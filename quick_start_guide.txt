@@ -1,0 +1,141 @@
+$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+$$$                                                           $$$
+$$$ This is a quick start guide to KAI, a program which       $$$
+$$$ processes calcium transient experimental recordings.      $$$
+$$$ It takes a raw signal as an input, cuts it into           $$$
+$$$ full periods and calculate certain metrics. As an output, $$$
+$$$ it provides intensity (time) values of each period,       $$$
+$$$ time derivative of signal intensity, durations at certain $$$
+$$$ values of repolarization.                                 $$$
+$$$                                                           $$$ 
+$$$ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% $$$
+$$$                                                           $$$
+$$$ Have any questions/suggestions/comments?                  $$$
+$$$ Leave them on GitHub                                      $$$
+$$$ https://github.com/EagerBeaver/kai/                       $$$
+$$$                                                           $$$
+$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
+Inside the program's folder you may find a subfolder named "sample".
+It contains 3 files:
+1) "sample_raw_signal_data.xlsx" - an input file containing raw signal data;
+2) "sample_ambient_signal_data.xlsx" - an input file containing ambient signal data;
+3) "sample_output_signal_data.xlsx" - an output file containing processed signal data.
+You may use them for a test-run.
+
+
+****************************
+****************************
+****** I. Main window ******
+****************************
+****************************
+
+--- Global parameters --- 
+1) Pacing frequency (Hz) --- a frequency of a stimulator used to stimulate cells (typically, 0.5Hz, 1Hz, 2Hz). By default it is set to 1 Hz.
+2) OY transposition --- an OY starting point of a processed signal. It is automatically defined by the program during processing. Ultumately, a starting point of all signal periods after processing is (0.0, 0.0).
+3) Verbose --- detalization of output info:
+	0 --- silent
+	1 --- major plots and messages (by default)
+	2 --- all plots and messages
+
+
+--- Set global parameters --- 
+Pres this button to pass (pre-defined) values of the global parameters to the program.
+You can type the values manually or pass the default values just by pressing this button.
+
+
+--- Select input file path --- 
+Press this button to choose a file which contains a recording of raw signal data.
+You can select an .XLSX file as well as a .CSV file. 
+If you select an .XLSX file, make sure that an excel sheet with your signal data is named "data".
+Also make sure that a decimal separator of numeric data is a point (i.e. "121.4", not "121,4").
+By convention, a column containing time-data should be named "t' and a column containing intensity-data should be named "i".
+
+
+--- Select input file path of an ambient signal (optional) --- 
+Press this button to choose a file wich contains ambient signal data (with no stimulation) if such data is available.
+If such data is provided, it will be substracted from signal data.
+You can select an .XLSX file as well as a .CSV file. 
+If you select an .XLSX file, make sure that an excel sheet with your signal data is named "data".
+Also make sure that a decimal separator of numeric data is a point (i.e. "121.4", not "121,4").
+By convention, a column containing time-data should be named "t' and a column containing intensity-data should be named "i".
+
+
+--- Select output file path --- 
+Press this button to choose a path of an output file.
+You do not need to specify the output file extension.
+The output file will be an .XLSX file with 3 sheets.
+Sheet 1: output_processed_signal --- it contains processed signal data.
+Sheet 2: output_angles --- it contains a value of a maximal time derivative (=tangent, + a corresponding angle) of a processed signal (periods + an averaged period). 
+Sheet 3: output_durations --- it contains values of the durations (at 20%, 50% and 90% of signal's peak) of the processed signal (periods + an averaged period). 
+
+
+--- Start --- 
+Press this button to start signal processing.
+
+
+--- Abort the processing --- 
+Press this button if you want to interrupt the signal processing.
+If pressed, all windows except the main program window will be closed right after a current processing stage has been completed.
+Then, if needed, you will be able to change the input parameters, input and output file paths and press the "Start" button again to start signal processing from the beginning.
+
+
+--- Exit --- 
+Press this button to close the program.
+All windows will be immediately closed.
+The button can be pressed anytime. 
+
+
+****************************************
+****************************************
+****** II. Filters Utility window ******
+****************************************
+****************************************
+
+
+--- Choose filters parameters ---
+The program implements 3 signal filters: Gaussian, Lowpass and Savgol. You can set a Mode for each filter. There are 3 Modes. Mode 1 represents a lower level of smoothness. Mode 3 represents a higher level of smoothness. Mode 2 represents an average level of smoothness.
+All 3 filters can be combined. The "Combined filter" represents a combination of those 3 filters.
+
+
+--- Plot baseline and filtered signals ---
+Press this button to juxtapose a non-filtered signal with a filtered signal.
+When pressed, you will see 4 plots representing a behavior of 4 different filters.
+Use this button to observe effects of different Modes and to choose the most optimal Filter-Mode combination for a given signal.
+
+
+--- Set one filter ---
+Press this button to choose 1 of 4 filters which will be used in futher calculations.
+A Mode of the chosen filter is set by a user in the "Choose filters parameters" section.
+
+
+--- Set a filter using a specified mode ---
+Press this button to pass information about a chosen Filter-Mode combination to the program for further calculations.
+Choose a desired filter in the "Set one filter" section.
+Choose a desired Mode in the "Choose filters parameters" section.
+
+
+--- Exit (return to the main program) ---
+Once a filter is set, you may close the Filters Utility window by pressing this button.
+
+
+*******************************************
+*******************************************
+****** III. Periods to remove window ******
+*******************************************
+*******************************************
+
+
+Numbers of all FULL periods are displayed on this window. 
+Click on a checkbox to choose which period will be removed. 
+If you do not want to remove any periods, press the "Set periods to be removed" button anyway. You will immediately see a message: "No periods will be removed".
+
+
+--- Set periods to be removed ---
+Press this button to pass information about periods which will be removed to the program. If you do not click on any checkboxes, neither of the periods will be removed.
+
+
+--- Exit ---
+Press this button to close the "Periods to remove" window and return to the Main program.
+Make sure to close all plots and figures before closing this window. 
+
