@@ -208,9 +208,9 @@ def aggregate_metrics(period_metrics: Sequence[Dict[str, float]]) -> Dict[str, f
     return agg
 
 
-# Smoke test: integrate with previous modules
+# Testing (optional)
 if __name__ == "__main__":
-    import sys, json, numpy as np
+    import sys, json
     sys.path.append("/data")
 
     summary = {}
@@ -233,6 +233,6 @@ if __name__ == "__main__":
             "rise_10_90_mean": agg.get("rise_10_90_mean", None)
         }
     except Exception as e:
-        summary["error"] = str(e)
+        summary["metrics_test_error"] = str(e)
 
     print(json.dumps(summary, indent=2))

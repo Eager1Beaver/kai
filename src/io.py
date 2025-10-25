@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 
@@ -99,14 +99,14 @@ def subtract_ambient(t_raw: np.ndarray, y_raw: np.ndarray, t_amb: np.ndarray, y_
     }
     return y_corr, meta
 
-# Add /mnt/data to sys.path and retry the smoke test.
+# Testing (optional)
 if __name__ == "__main__":
     import sys, json
     sys.path.append("data")
 
     summary = {}
     try:
-        from src.io import load_signal, subtract_ambient
+        #from src.io import load_signal, subtract_ambient
         raw_csv = "/data/sample_raw_signal_data.csv"
         amb_csv = "/data/sample_ambient_signal_data.csv"
         t_raw, y_raw, info_raw = load_signal(raw_csv)
@@ -117,6 +117,6 @@ if __name__ == "__main__":
         summary["corr_preview"] = [float(y_corr[0]), float(y_corr[min(10, len(y_corr)-1)])]
         summary["meta"] = meta
     except Exception as e:
-        summary["smoke_test_error"] = str(e)
+        summary["io_test_error"] = str(e)
 
     print(json.dumps(summary, indent=2))

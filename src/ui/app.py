@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import math
 
 
 # Ensure TkAgg backend for interactive use
@@ -94,7 +95,7 @@ class App(tk.Tk):
         self.metrics_tree.column("metric", width=240, anchor="w")
         self.metrics_tree.column("mean", width=120, anchor="center")
         self.metrics_tree.column("std", width=120, anchor="center")'''
-        self.metrics_tree.pack(fill="both", expand=True)
+        self.metrics_tree.pack(fill="both", expand=True, padx=6, pady=6)
     
 
     # ---------- UI Style ----------
@@ -227,9 +228,6 @@ class App(tk.Tk):
             self._render_metrics_tab()
             self._update_overlay_plot()
             return
-        #t, y = self._current_signal()
-        #self.seg_info = build_period_indices(t, self.peaks_min, self.peaks_max, strategy="min2min")
-        #self.periods = slice_periods(t, y, self.seg_info.indices)
 
         # Also slice RAW (ambient-corrected/raw) periods on the same indices
         periods_raw = slice_periods(t, y_base, self.seg_info.indices)
@@ -244,6 +242,7 @@ class App(tk.Tk):
         per_r = metrics_for_periods(periods_raw) or []
         agg_f = aggregate_metrics(per_f) if per_f else {}
         agg_r = aggregate_metrics(per_r) if per_r else {}
+        self._render_metrics_tab_from_aggs(agg_r, agg_f)
 
         # Merge both into a flat dict for rendering/export
         #self.metrics_period = {"filtered": per_f, "raw": per_r}
@@ -281,6 +280,10 @@ class App(tk.Tk):
         self.sig_plot.set_period_boundaries(bounds, removed=getattr(self, "removed_periods", set()))
 
         self._update_overlay_plot()
+
+        # TODO: deprecate this func in favor of separate calls
+        self.recompute_periods()
+        self.compute_metrics_aggregates()
 
 
     def _render_periods_tab(self):
@@ -386,22 +389,152 @@ class App(tk.Tk):
             if all((isinstance(v, float) and (v != v)) for v in row[1:]):  # all NaN
                 continue
             self.metrics_tree.insert("", "end", values=(row[0], *(f"{v:.6g}" for v in row[1:])))
-
-        '''for row in self.metrics_tree.get_children():
-            self.metrics_tree.delete(row)
-        if not self.metrics_agg:
+        
+        # Deprecate this func
+        agg_r = getattr(self, "metrics_agg_raw", {})
+        agg_f = getattr(self, "metrics_agg_filt", {})
+        self._render_metrics_tab_from_aggs(agg_r, agg_f)
+    
+    
+    
+    ##################
+    # NEW, separate function, just periods
+    def recompute_periods(self):
+        """
+        Build kept periods for the analysis signal (filtered if available) and for the raw baseline,
+        using the current segmentation indices and removed_periods set. Also updates the Overlay tab.
+        Produces: self.periods        (list of (t_i, y_i) or as your segment.py returns inside slice_periods)
+                self.periods_raw    (same indices, raw baseline)
+        """
+        # need segmentation indices
+        if not getattr(self, "seg_info", None) or not self.seg_info.indices:
+            self.periods = []
+            self.periods_raw = []
+            self._update_overlay_plot()
             return
-        # Insert top metrics (a selection to keep it readable)
-        keys_priority = [
-            "APD20_mean","APD50_mean","APD90_mean",
-            "time_to_peak_mean","rise_10_90_mean","decay_90_10_mean",
-            "upstroke_angle_deg_mean","downstroke_angle_deg_mean",
-            "auc_above_baseline_mean",
-        ]
-        for key in keys_priority:
-            mean = self.metrics_agg.get(key, float("nan"))
-            std = self.metrics_agg.get(key.replace("_mean", "_std"), float("nan"))
-            self.metrics_tree.insert("", "end", values=(key, f"{mean:.6g}", f"{std:.6g}"))'''
+
+        # choose series
+        t, y_base = self._current_signal()
+        y_det = self.y_filt if (self.y_filt is not None) else y_base
+
+        # keep-by-index respecting removed_periods (1-based)
+        removed = getattr(self, "removed_periods", set())
+        kept_indices = [ij for k, ij in enumerate(self.seg_info.indices, start=1) if k not in removed]
+        if not kept_indices:
+            self.periods = []
+            self.periods_raw = []
+            self._update_overlay_plot()
+            return
+
+        # slice on SAME indices for both series
+        self.periods = slice_periods(t, y_det, kept_indices)
+        self.periods_raw = slice_periods(t, y_base, kept_indices)
+
+        # refresh overlay (uses self.periods)
+        self._update_overlay_plot()
+        #
+
+    # app.py
+    def compute_metrics_aggregates(self):
+        """
+        Use metrics.py to compute per-period metrics for filtered and raw,
+        aggregate them, store, and render the Metrics tab.
+        Requires self.periods and self.periods_raw built by recompute_periods().
+        Produces: self.metrics_agg_raw, self.metrics_agg_filt
+        """
+        # if no periods, clear table
+        if not getattr(self, "periods", None):
+            self.metrics_agg_raw = {}
+            self.metrics_agg_filt = {}
+            self._render_metrics_tab_from_aggs(self.metrics_agg_raw, self.metrics_agg_filt)
+            return
+
+        # Use your already-imported metrics.py API
+
+        per_f = metrics_for_periods(self.periods) or []
+        per_r = metrics_for_periods(self.periods_raw) or []
+        agg_f = aggregate_metrics(per_f) if per_f else {}
+        agg_r = aggregate_metrics(per_r) if per_r else {}
+
+        self.metrics_agg_raw = agg_r
+        self.metrics_agg_filt = agg_f
+
+        self._render_metrics_tab_from_aggs(agg_r, agg_f)
+        #
+
+    #
+    def _clear_metrics_table(self):
+        if hasattr(self, "metrics_tree"):
+            for row in self.metrics_tree.get_children():
+                self.metrics_tree.delete(row)
+
+    def _normalize_agg(self, agg):
+        """
+        Accepts either:
+        A) {'APD90_mean': x, 'APD90_std': y, 'rise_10_90_mean': ...}
+        B) {'APD90': {'mean': x, 'std': y}, 'rise_10_90': {'mean':...,'std':...}}
+        Returns: dict base -> (mean, std)
+        """
+        if not agg:
+            return {}
+        out = {}
+        for k, v in agg.items():
+            if isinstance(v, dict):
+                mean = v.get("mean", float("nan"))
+                std  = v.get("std", float("nan"))
+                out[k] = (mean, std)
+            else:
+                if k.endswith("_mean"):
+                    base = k[:-5]
+                    mean = v
+                    cur = out.get(base, (float("nan"), float("nan")))
+                    out[base] = (mean, cur[1])
+                elif k.endswith("_std"):
+                    base = k[:-4]
+                    std = v
+                    cur = out.get(base, (float("nan"), float("nan")))
+                    out[base] = (cur[0], std)
+                # ignore other keys if any
+        return out
+
+    def _render_metrics_tab_from_aggs(self, agg_raw, agg_filt):
+        """
+        agg_raw / agg_filt: whatever your metrics.py returns; we normalize them
+        and fill the table with columns: Metric | Raw mean | Raw std | Filt mean | Filt std
+        """
+        self._clear_metrics_table()
+        if not hasattr(self, "metrics_tree"):
+            return
+
+        norm_r = self._normalize_agg(agg_raw)
+        norm_f = self._normalize_agg(agg_filt)
+        bases = sorted(set(norm_r.keys()) | set(norm_f.keys()))
+        if not bases:
+            return
+
+        # optional ordering: put common electrophys metrics first
+        priority = ["APD20","APD50","APD90","rise_10_90","decay_90_10",
+                    "time_to_peak","upstroke_angle_deg","downstroke_angle_deg",
+                    "auc_above_baseline","duration_s","amp_mean","amp_std","amp_peak","amp_min","amp_range","slope_max","slope_min"]
+        order = [b for b in priority if b in bases] + [b for b in bases if b not in priority]
+
+        def fmt(x):
+            if x is None or (isinstance(x, float) and math.isnan(x)):
+                return "—"
+            return f"{x:.4g}"
+
+        for base in order:
+            rmu, rsd = norm_r.get(base, (float("nan"), float("nan")))
+            fmu, fsd = norm_f.get(base, (float("nan"), float("nan")))
+            # if literally everything is NaN, skip
+            if all(isinstance(v, float) and math.isnan(v) for v in (rmu, rsd, fmu, fsd)):
+                continue
+            self.metrics_tree.insert(
+                "", "end",
+                values=(base, fmt(rmu), fmt(rsd), fmt(fmu), fmt(fsd))
+            )
+            #    
+            
 
     # ---------- Export ----------
     def export_all(self):
@@ -452,7 +585,7 @@ class App(tk.Tk):
         plt.plot(t, y_base, label="Raw" if self.y_corr is None else "Ambient-corrected", lw=1.0, alpha=0.7)
         if self.y_filt is not None:
             plt.plot(t, self.y_filt, label=f"Filtered (S={self.filter_engine.smoothing_level})", lw=1.2)
-        plt.legend(bbox_to_anchor=(1.0, 1.2), loc="upper right"); 
+        plt.legend(bbox_to_anchor=(1.0, 1.3), loc="upper right"); 
         plt.xlabel("Time (s)"); plt.ylabel("Signal"); plt.tight_layout()
         fig1.savefig(base + "_signal.png", dpi=160)
         plt.close(fig1)
