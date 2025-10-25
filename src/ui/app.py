@@ -4,6 +4,8 @@ from tkinter import ttk, filedialog, messagebox
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 
 # Ensure TkAgg backend for interactive use
 import matplotlib
@@ -15,7 +17,7 @@ from src.detect import find_peaks_adaptive, snap_to_local_extremum, insert_peak,
 from src.segment import build_period_indices, slice_periods, resample_periods, normalize_periods, average_period
 from src.metrics import metrics_for_periods, aggregate_metrics
 
-from .plot import SignalPlot
+from .plot import SignalPlot, draw_periods_overlay
 from .views import Sidebar, Tabs
 
 class App(tk.Tk):
@@ -93,6 +95,7 @@ class App(tk.Tk):
         self.metrics_tree.column("mean", width=120, anchor="center")
         self.metrics_tree.column("std", width=120, anchor="center")'''
         self.metrics_tree.pack(fill="both", expand=True)
+    
 
     # ---------- UI Style ----------
     def _build_styles(self):
@@ -120,7 +123,11 @@ class App(tk.Tk):
 
     def on_set_pacing(self, hz: float):
         self.pacing_hz_manual = float(hz) if hz and hz > 0 else None
-        self.sidebar.status.config(text=f"Pacing set to {self.pacing_hz_manual or 'auto'} Hz")
+        msg = f"Current: {self.pacing_hz_manual:.3g} Hz" if self.pacing_hz_manual else "Current: auto"
+        try:
+            self.sidebar.pace_status.config(text=msg)
+        except Exception:
+            pass
         self.refresh_signal(live=False)
 
     def _pacing_hint(self):
@@ -138,7 +145,7 @@ class App(tk.Tk):
 
     def on_smooth_changed(self, S: int):
         self.filter_engine.set_level(int(S))
-        self.refresh_signal(live=True)
+        self.refresh_signal(live=True)    
 
     def _current_signal(self):
         # Prefer ambient-corrected if available
@@ -210,9 +217,16 @@ class App(tk.Tk):
             return
         # Build periods from the analysis signal (filtered if available) for visuals
         t, y_base = self._current_signal()
-        y_det = self.y_filt if self.y_filt is not None else y_base
+        y_det = self.y_filt if (self.y_filt is not None) else y_base
         self.seg_info = build_period_indices(t, self.peaks_min, self.peaks_max, strategy="min2min")
         self.periods = slice_periods(t, y_det, self.seg_info.indices)
+
+        if not self.seg_info or not self.seg_info.indices:
+            self.periods = []
+            self.metrics_agg = {}
+            self._render_metrics_tab()
+            self._update_overlay_plot()
+            return
         #t, y = self._current_signal()
         #self.seg_info = build_period_indices(t, self.peaks_min, self.peaks_max, strategy="min2min")
         #self.periods = slice_periods(t, y, self.seg_info.indices)
@@ -220,20 +234,26 @@ class App(tk.Tk):
         # Also slice RAW (ambient-corrected/raw) periods on the same indices
         periods_raw = slice_periods(t, y_base, self.seg_info.indices)
 
+        if not self.periods or len(self.periods) == 0:
+            self.metrics_agg = {}
+            self._render_metrics_tab(); self._update_overlay_plot()
+            return
+    
         # Metrics
-        per_f = metrics_for_periods(self.periods)
-        per_r = metrics_for_periods(periods_raw)
-        agg_f = aggregate_metrics(per_f)
-        agg_r = aggregate_metrics(per_r)
+        per_f = metrics_for_periods(self.periods) or []
+        per_r = metrics_for_periods(periods_raw) or []
+        agg_f = aggregate_metrics(per_f) if per_f else {}
+        agg_r = aggregate_metrics(per_r) if per_r else {}
 
         # Merge both into a flat dict for rendering/export
-        self.metrics_period = {"filtered": per_f, "raw": per_r}
+        #self.metrics_period = {"filtered": per_f, "raw": per_r}
+        keys = sorted(set(k.split("_")[0] for k in list(agg_f.keys())+list(agg_r.keys())))
         self.metrics_agg = {}
-        for k in set(k for d in per_f+per_r for k in d.keys()):
-            self.metrics_agg[f"{k}_raw_mean"]  = agg_r.get(f"{k}_mean",  float("nan"))
-            self.metrics_agg[f"{k}_raw_std"]   = agg_r.get(f"{k}_std",   float("nan"))
-            self.metrics_agg[f"{k}_filt_mean"] = agg_f.get(f"{k}_mean",  float("nan"))
-            self.metrics_agg[f"{k}_filt_std"]  = agg_f.get(f"{k}_std",   float("nan"))
+        for base in keys:
+            self.metrics_agg[f"{base}_raw_mean"]  = agg_r.get(f"{base}_mean",  float("nan"))
+            self.metrics_agg[f"{base}_raw_std"]   = agg_r.get(f"{base}_std",   float("nan"))
+            self.metrics_agg[f"{base}_filt_mean"] = agg_f.get(f"{base}_mean",  float("nan"))
+            self.metrics_agg[f"{base}_filt_std"]  = agg_f.get(f"{base}_std",   float("nan"))
         self._render_metrics_tab()
 
         # Build spans for visual "to be removed" preview (edges + future selections)
@@ -254,6 +274,15 @@ class App(tk.Tk):
         self.metrics_agg = aggregate_metrics(self.metrics_period)
         self._render_metrics_tab()
 
+        # Build period boundaries for drawing (using indices from seg_info)
+        bounds = []
+        for p_idx, (i, j) in enumerate(self.seg_info.indices, start=1):
+            bounds.append((self.t_raw[i], self.t_raw[j], p_idx))
+        self.sig_plot.set_period_boundaries(bounds, removed=getattr(self, "removed_periods", set()))
+
+        self._update_overlay_plot()
+
+
     def _render_periods_tab(self):
         self.periods_text.delete("1.0", "end")
         if not self.periods:
@@ -265,22 +294,60 @@ class App(tk.Tk):
             lines.append(f"Period {k:02d}: N={len(t_seg)}  duration={dur:.3f}s")
         self.periods_text.insert("end", "\n".join(lines))
 
+    def _update_overlay_plot(self):
+        if not hasattr(self, "tabs") or not hasattr(self.tabs, "overlay_ax"): return
+
+        ax = self.tabs.overlay_ax
+        canvas = self.tabs.overlay_canvas
+
+        try:
+            ax.clear()
+            # If we have no periods computed yet, show a helpful title
+            if not getattr(self, "periods", None):
+                ax.set_title("No periods yet — detect extrema first.")
+                canvas.draw_idle()
+                return
+
+            # Resample current analysis signal periods (filtered if available)
+            X, tau = resample_periods(self.periods, n_points=200)
+            if X is None or len(X) == 0:
+                ax.set_title("No periods to display")
+                canvas.draw_idle()
+                return
+
+            Xn = normalize_periods(X, mode="baseline")
+            mu, sd = average_period(Xn)
+
+            # Draw overlay
+            draw_periods_overlay(ax, tau, Xn, mu, sd, labeled_max=12)
+
+            canvas.draw_idle()
+
+        except Exception as e:
+            # Fail-safe: show error on the canvas to aid debugging (optional)
+            ax.clear()
+            ax.text(0.02, 0.95, f"Overlay error:\n{e}", transform=ax.transAxes,
+                    va="top", ha="left", fontsize=9, color="crimson")
+            canvas.draw_idle()
+    
+
     def _render_metrics_tab(self):
         # Clear
         for row in self.metrics_tree.get_children(): self.metrics_tree.delete(row)
         if not self.metrics_agg: return
-        keys_priority = ["APD20","APD50","APD90","time_to_peak","rise_10_90","decay_90_10",
-                        "upstroke_angle_deg","downstroke_angle_deg","auc_above_baseline"]
-        for base in keys_priority:
-            vals = (
+        # Only render metrics that have at least one non-NaN value
+        bases = sorted(set(k.rsplit("_", 2)[0] for k in self.metrics_agg.keys()))
+        for base in bases:
+            row = (
                 base,
                 self.metrics_agg.get(f"{base}_raw_mean", float("nan")),
                 self.metrics_agg.get(f"{base}_raw_std", float("nan")),
                 self.metrics_agg.get(f"{base}_filt_mean", float("nan")),
                 self.metrics_agg.get(f"{base}_filt_std", float("nan")),
             )
-            self.metrics_tree.insert("", "end",
-                values=(vals[0], *(f"{v:.6g}" for v in vals[1:])))
+            if all((isinstance(v, float) and (v != v)) for v in row[1:]):  # all NaN
+                continue
+            self.metrics_tree.insert("", "end", values=(row[0], *(f"{v:.6g}" for v in row[1:])))
 
         '''for row in self.metrics_tree.get_children():
             self.metrics_tree.delete(row)
@@ -347,7 +414,7 @@ class App(tk.Tk):
         plt.plot(t, y_base, label="Raw" if self.y_corr is None else "Ambient-corrected", lw=1.0, alpha=0.7)
         if self.y_filt is not None:
             plt.plot(t, self.y_filt, label=f"Filtered (S={self.filter_engine.smoothing_level})", lw=1.2)
-        plt.legend(bbox_to_anchor=(1.05, 1), loc="upper right"); 
+        plt.legend(bbox_to_anchor=(1.2, 1.0), loc="upper right"); 
         plt.xlabel("Time (s)"); plt.ylabel("Signal"); plt.tight_layout()
         fig1.savefig(base + "_signal.png", dpi=160)
         plt.close(fig1)

@@ -56,7 +56,51 @@ class SignalPlot:
 
     def set_removed_spans(self, spans):  # spans = list of (t_start, t_end)
         self._removed_spans = list(spans or [])
-        self._redraw()    
+        self._redraw()
+
+    def set_period_boundaries(self, boundaries, removed=set()):
+        """
+        boundaries: list of (t_start, t_end, idx) for each period in time axis
+        removed: set of integer period indices that the user marked for deletion
+        """
+        self._period_bounds = list(boundaries or [])
+        self._periods_removed = set(removed or set())
+        self._redraw()
+
+    def _draw_period_boundaries(self):
+        if not hasattr(self, "_period_bounds"): return
+        for (t0, t1, k) in self._period_bounds:
+            color = "red" if k in self._periods_removed else "k"
+            # dashed separators
+            self.ax.axvline(t0, color=color, ls="--", lw=0.8, alpha=0.5)
+            self.ax.axvline(t1, color=color, ls="--", lw=0.8, alpha=0.5)
+            # label number
+            tx = 0.5*(t0+t1)
+            ymin, ymax = self.ax.get_ylim()
+            ty = ymin + 0.92*(ymax-ymin)
+            self.ax.text(tx, ty, f"{k}", ha="center", va="top",
+                        fontsize=9, color=color, bbox=dict(facecolor="white", alpha=0.6, lw=0))    
+
+    def _clear_extrema_artists(self):
+        for art in getattr(self, "_extrema_artists", []):
+            try: art.remove()
+            except Exception: pass
+        self._extrema_artists = []
+
+    def _draw_extrema_arrows(self, t, y, idxs_up, idxs_dn):
+        self._clear_extrema_artists()
+        # arrow heights as a fraction of signal span
+        if len(y) == 0: return
+        yspan = max(1e-9, (np.nanmax(y) - np.nanmin(y)))
+        h = 0.12 * yspan
+        for i in idxs_up:
+            a = self.ax.annotate("", xy=(t[i], y[i]+h*0.5), xytext=(t[i], y[i]-h*0.5),
+                                arrowprops=dict(arrowstyle='-|>', lw=1.2, color='red'))
+            self._extrema_artists.append(a)
+        for i in idxs_dn:
+            a = self.ax.annotate("", xy=(t[i], y[i]-h*0.5), xytext=(t[i], y[i]+h*0.5),
+                                arrowprops=dict(arrowstyle='-|>', lw=1.2, color='red'))
+            self._extrema_artists.append(a)    
 
     def _redraw(self):
         self.ax.clear()
@@ -76,9 +120,15 @@ class SignalPlot:
         if self.peaks_max.size > 0:
             self._max_scatter = self.ax.scatter(self.t[self.peaks_max], y_for_peaks[self.peaks_max],
                                                 s=18, c="tab:orange", marker="^", label="max")
+        # then arrows for extrema
+        if hasattr(self, "peaks_max") and hasattr(self, "peaks_min"):
+            self._draw_extrema_arrows(self.t, y_for_peaks, self.peaks_max, self.peaks_min)    
         # NEW: draw removed spans in light red under everything
         for (t0, t1) in getattr(self, "_removed_spans", []):
             self.ax.axvspan(t0, t1, color="red", alpha=0.15, linewidth=0)
+
+        self._draw_period_boundaries()
+    
         self.ax.legend(loc="upper right")
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("Signal (a.u.)")
@@ -95,3 +145,40 @@ class SignalPlot:
                 self.on_click_peak(float(event.xdata))
             except Exception:
                 pass
+
+
+def draw_periods_overlay(ax, tau, Xn, mean, std, labeled_max=12):
+    """
+    tau: (P, ) normalized time
+    Xn:  (N, P) normalized periods
+    mean, std: (P, )
+    labeled_max: how many individual periods to label in legend (cap to avoid clutter)
+    """
+    ax.clear()
+
+    # Guard for empty input
+    if Xn is None or len(np.shape(Xn)) != 2 or Xn.shape[0] == 0:
+        ax.set_title("No periods available")
+        ax.figure.tight_layout()
+        return
+
+    # draw individual periods
+    n = Xn.shape[0]
+    for i in range(n):
+        # Label only first 'labeled_max' periods
+        lbl = f"Period {i+1}" if i < labeled_max else None
+        ax.plot(tau, Xn[i], alpha=0.35, lw=1.0, label=lbl)
+
+    # mean and ±std band
+    ax.plot(tau, mean, lw=1.8, label="Mean")
+    if std is not None and np.all(np.isfinite(std)):
+        ax.fill_between(tau, mean-std, mean+std, alpha=0.15, linewidth=0)
+
+    ax.set_xlabel("Normalized time τ")
+    ax.set_ylabel("Normalized amplitude")
+    
+    # legend: place outside if many handles
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels, ncol=2, fontsize=9, frameon=True, loc="upper left")
+    ax.figure.tight_layout()
