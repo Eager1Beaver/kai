@@ -294,42 +294,80 @@ class App(tk.Tk):
             lines.append(f"Period {k:02d}: N={len(t_seg)}  duration={dur:.3f}s")
         self.periods_text.insert("end", "\n".join(lines))
 
+
     def _update_overlay_plot(self):
         if not hasattr(self, "tabs") or not hasattr(self.tabs, "overlay_ax"): return
 
         ax = self.tabs.overlay_ax
         canvas = self.tabs.overlay_canvas
+        ax.clear()
 
+         
+        # If we have no periods computed yet, show a helpful title
+        if not getattr(self, "periods", None) or len(self.periods) == 0:
+            ax.set_title("No periods yet — detect extrema first.")
+            canvas.draw_idle()
+            return
+
+        # Resample current analysis signal periods (filtered if available)
+        res = resample_periods(self.periods, n_points=200)
         try:
-            ax.clear()
-            # If we have no periods computed yet, show a helpful title
-            if not getattr(self, "periods", None):
-                ax.set_title("No periods yet — detect extrema first.")
-                canvas.draw_idle()
-                return
+            X, tau = res
+        except Exception:
+            X = res
+            tau = np.linspace(0.0, 1.0, X.shape[1])
 
-            # Resample current analysis signal periods (filtered if available)
-            X, tau = resample_periods(self.periods, n_points=200)
-            if X is None or len(X) == 0:
-                ax.set_title("No periods to display")
-                canvas.draw_idle()
-                return
-
-            Xn = normalize_periods(X, mode="baseline")
-            mu, sd = average_period(Xn)
-
-            # Draw overlay
-            draw_periods_overlay(ax, tau, Xn, mu, sd, labeled_max=12)
-
+        if X is None or len(X) == 0:
+            ax.set_title("No periods to display")
             canvas.draw_idle()
+            return
 
-        except Exception as e:
-            # Fail-safe: show error on the canvas to aid debugging (optional)
-            ax.clear()
-            ax.text(0.02, 0.95, f"Overlay error:\n{e}", transform=ax.transAxes,
-                    va="top", ha="left", fontsize=9, color="crimson")
+        kept_rows, labels = self._kept_row_indices_and_labels()
+        if not kept_rows:
+            ax.set_title("All periods removed — nothing to display")
             canvas.draw_idle()
+            return
+
+        # Select kept rows (by original order) so numbering matches Signal tab
+        X_kept = X[kept_rows, :]
+
+        # Normalize and average
+        Xn = normalize_periods(X_kept, mode="baseline")
+        mu, sd = average_period(Xn)
+
+        # Draw overlay
+        draw_periods_overlay(ax, tau, Xn, mu, sd, labels=labels, labeled_max=12)
+
+        canvas.draw_idle()
+
     
+        # Fail-safe: show error on the canvas to aid debugging (optional)
+        #ax.clear()
+        #ax.text(0.02, 0.95, f"Overlay error:\n{e}", transform=ax.transAxes,
+        #        va="top", ha="left", fontsize=9, color="crimson")
+        #canvas.draw_idle()
+    
+
+    def _kept_row_indices_and_labels(self):
+        """
+        Returns:
+        kept_rows: list[int]     -- 0-based row indices into self.periods / resampled matrix
+        labels:    list[str]     -- e.g., ["Period 1", "Period 3", ...] using original numbering
+        Uses self.seg_info.indices order (1..N). Skips self.removed_periods if present.
+        """
+        kept_rows, labels = [], []
+        if not getattr(self, "seg_info", None) or not self.seg_info.indices:
+            return kept_rows, labels
+
+        removed = getattr(self, "removed_periods", set())  # {1-based indices}
+        for row_idx_0, (_ij) in enumerate(self.seg_info.indices):
+            k = row_idx_0 + 1  # 1-based label, consistent with Signal tab
+            if k in removed:
+                continue
+            kept_rows.append(row_idx_0)
+            labels.append(f"Period {k}")
+        return kept_rows, labels
+
 
     def _render_metrics_tab(self):
         # Clear
@@ -414,24 +452,37 @@ class App(tk.Tk):
         plt.plot(t, y_base, label="Raw" if self.y_corr is None else "Ambient-corrected", lw=1.0, alpha=0.7)
         if self.y_filt is not None:
             plt.plot(t, self.y_filt, label=f"Filtered (S={self.filter_engine.smoothing_level})", lw=1.2)
-        plt.legend(bbox_to_anchor=(1.2, 1.0), loc="upper right"); 
+        plt.legend(bbox_to_anchor=(1.0, 1.2), loc="upper right"); 
         plt.xlabel("Time (s)"); plt.ylabel("Signal"); plt.tight_layout()
         fig1.savefig(base + "_signal.png", dpi=160)
         plt.close(fig1)
 
         # 2) Overlaid resampled periods + average
-        if len(self.periods) > 0:
-            X, tau = resample_periods(self.periods, n_points=200)
-            Xn = normalize_periods(X, mode="baseline")
-            mu, sd = average_period(Xn)
-            fig2 = plt.figure(figsize=(8,3))
-            for row in Xn:
-                plt.plot(tau, row, alpha=0.25)
-            plt.plot(tau, mu, lw=1.6, label="mean")
-            plt.legend(); plt.xlabel("Normalized time τ"); plt.ylabel("Norm. amplitude")
-            plt.tight_layout()
-            fig2.savefig(base + "_periods_overlay.png", dpi=160)
-            plt.close(fig2)    
+        try:
+            if getattr(self, "periods", None) and len(self.periods) > 0:
+                res = resample_periods(self.periods, n_points=200)
+                try:
+                    X, tau = res
+                except Exception:
+                    X = res
+                    tau = np.linspace(0.0, 1.0, X.shape[1])
+
+                kept_rows, labels = self._kept_row_indices_and_labels()
+                if kept_rows:
+                    X_kept = X[kept_rows, :]
+                    Xn = normalize_periods(X_kept, mode="baseline")
+                    mu, sd = average_period(Xn)
+
+                fig2 = plt.figure(figsize=(8,3))
+                ax2 = fig2.add_subplot(111)
+
+                draw_periods_overlay(ax2, tau, Xn, mu, sd, labels=labels, labeled_max=12)
+                fig2.savefig(base + "_periods_overlay.png", dpi=160)
+                plt.close(fig2)  
+
+        except Exception as e:
+            # optional: log but don't crash export
+            print("Export overlay failed:", e)    
 
         # Also dump a session.json alongside
         session = {

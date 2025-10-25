@@ -35,13 +35,23 @@ class Sidebar(ttk.Frame):
         ttk.Entry(frm, textvariable=self.scale_var, width=8).grid(row=1, column=1, sticky="w", padx=(4,0))
         ttk.Button(frm, text="Apply", command=lambda: on_apply_offset_scale(self.offset_var.get(), self.scale_var.get())).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
 
+        # NEW: pacing
+        pace = ttk.LabelFrame(self, text="Pacing (manual)", padding=6)
+        pace.grid(row=4, column=0, sticky="ew", pady=(8,4))
+        ttk.Label(pace, text="Hz:").grid(row=0, column=0, sticky="w")
+        self.pace_var = tk.DoubleVar(value=0.0)
+        ttk.Entry(pace, textvariable=self.pace_var, width=8).grid(row=0, column=1, padx=(4,0), sticky="w")
+        ttk.Button(pace, text="Use", command=lambda: on_set_pacing(self.pace_var.get())).grid(row=0, column=2, padx=(6,0))
+        self.pace_status = ttk.Label(pace, text="Current: auto", foreground="#555")
+        self.pace_status.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4,0))
+
         # Smoothing
         lab = ttk.Label(self, text="Smoothing", style="Heading.TLabel")
-        lab.grid(row=4, column=0, sticky="w", pady=(8,4))
+        lab.grid(row=5, column=0, sticky="w", pady=(8,4))
 
         # Subframe so the scale can expand while the label sits at the right
         smooth_frame = ttk.Frame(self)
-        smooth_frame.grid(row=5, column=0, sticky="ew")
+        smooth_frame.grid(row=6, column=0, sticky="ew")
         smooth_frame.grid_columnconfigure(0, weight=1)  # scale expands
         smooth_frame.grid_columnconfigure(1, weight=0)
 
@@ -51,7 +61,6 @@ class Sidebar(ttk.Frame):
         # Guard to avoid re-entrancy when we snap the thumb
         self._snapping = False
         
-        # Ttk.Scale has no "resolution", so we snap after drag with a guard
         self.scale = ttk.Scale(
             smooth_frame, from_=0, to=5, orient="horizontal", length=260,
             command=lambda v: self._on_smooth_ui(v)
@@ -59,17 +68,7 @@ class Sidebar(ttk.Frame):
         self.scale.grid(row=0, column=0, sticky="ew")
         
         ttk.Label(self, text="0 = raw · 5 = heavy")\
-            .grid(row=6, column=0, sticky="w", pady=(2,0))
-
-        # NEW: pacing
-        pace = ttk.LabelFrame(self, text="Pacing (manual)", padding=6)
-        pace.grid(row=7, column=0, sticky="ew", pady=(8,4))
-        ttk.Label(pace, text="Hz:").grid(row=0, column=0, sticky="w")
-        self.pace_var = tk.DoubleVar(value=0.0)
-        ttk.Entry(pace, textvariable=self.pace_var, width=8).grid(row=0, column=1, padx=(4,0), sticky="w")
-        ttk.Button(pace, text="Use", command=lambda: on_set_pacing(self.pace_var.get())).grid(row=0, column=2, padx=(6,0))
-        self.pace_status = ttk.Label(pace, text="Current: auto", foreground="#555")
-        self.pace_status.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4,0))
+            .grid(row=7, column=0, sticky="w", pady=(2,0))
 
         # Actions
         ttk.Button(self, text="Detect Peaks", command=on_detect).grid(row=8, column=0, sticky="ew", pady=(8,0))

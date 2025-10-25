@@ -147,11 +147,12 @@ class SignalPlot:
                 pass
 
 
-def draw_periods_overlay(ax, tau, Xn, mean, std, labeled_max=12):
+def draw_periods_overlay(ax, tau, Xn, mean, std, *, labels=None, labeled_max=12):
     """
     tau: (P, ) normalized time
     Xn:  (N, P) normalized periods
     mean, std: (P, )
+    labels: optional list[str] of length N, e.g., ["Period 1", "Period 3", ...]
     labeled_max: how many individual periods to label in legend (cap to avoid clutter)
     """
     ax.clear()
@@ -165,8 +166,12 @@ def draw_periods_overlay(ax, tau, Xn, mean, std, labeled_max=12):
     # draw individual periods
     n = Xn.shape[0]
     for i in range(n):
-        # Label only first 'labeled_max' periods
-        lbl = f"Period {i+1}" if i < labeled_max else None
+        lbl = None
+        if labels is not None and i < len(labels):
+            # honor explicit labels, but still cap by labeled_max
+            lbl = labels[i] if i < labeled_max else None
+        else:
+            lbl = (f"Period {i+1}" if i < labeled_max else None)
         ax.plot(tau, Xn[i], alpha=0.35, lw=1.0, label=lbl)
 
     # mean and ±std band
@@ -180,5 +185,5 @@ def draw_periods_overlay(ax, tau, Xn, mean, std, labeled_max=12):
     # legend: place outside if many handles
     handles, labels = ax.get_legend_handles_labels()
     if handles:
-        ax.legend(handles, labels, ncol=2, fontsize=9, frameon=True, loc="upper left")
+        ax.legend(handles, labels, ncol=2, fontsize=9, frameon=True, loc="upper right")
     ax.figure.tight_layout()
