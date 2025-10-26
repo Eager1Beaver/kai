@@ -42,10 +42,13 @@ class App(tk.Tk):
         self.edit_mode = False
         self.seg_info = None
         self.periods = []
+        self.periods_raw = []
+        self.period_original_indices = []
+        self.removed_periods = set()
         self.X = None
         self.tau = None
-        self.metrics_period = []
-        self.metrics_agg = {}
+        self.metrics_agg_raw = {}
+        self.metrics_agg_filt = {}
 
         self.pacing_hz_manual = None
 
@@ -181,7 +184,8 @@ class App(tk.Tk):
         self.peaks_min, self.peaks_max = det.peaks_min, det.peaks_max
         self.sig_plot.set_peaks(self.peaks_min, self.peaks_max)
         self.sidebar.status.config(text=f"Detected peaks (min={len(self.peaks_min)}, max={len(self.peaks_max)})")
-        self._recompute_periods_and_metrics()
+        self.recompute_periods()
+        self.compute_metrics_aggregates()
 
     def toggle_edit(self):
         self.edit_mode = not self.edit_mode
@@ -210,50 +214,47 @@ class App(tk.Tk):
                 self.peaks_max = insert_peak(self.peaks_max, idx)
         self.peaks_min, self.peaks_max = enforce_alternation(self.peaks_min, self.peaks_max)
         self.sig_plot.set_peaks(self.peaks_min, self.peaks_max)
-        self._recompute_periods_and_metrics()
+        
+        self.recompute_periods()
+        self.compute_metrics_aggregates()
 
     # ---------- Periods & Metrics ----------
-    def _recompute_periods_and_metrics(self):
+    def recompute_periods(self):
+        """
+        Build kept periods for the analysis signal (filtered if available) and for the raw baseline,
+        using the current segmentation indices and removed_periods set. Also updates the Overlay tab.
+        Produces: self.periods        (list of (t_i, y_i) or as your segment.py returns inside slice_periods)
+                self.periods_raw    (same indices, raw baseline)
+        """
+        # need segmentation indices
         if self.t_raw is None or self.y_raw is None:
             return
-        # Build periods from the analysis signal (filtered if available) for visuals
         t, y_base = self._current_signal()
         y_det = self.y_filt if (self.y_filt is not None) else y_base
         self.seg_info = build_period_indices(t, self.peaks_min, self.peaks_max, strategy="min2min")
-        self.periods = slice_periods(t, y_det, self.seg_info.indices)
 
         if not self.seg_info or not self.seg_info.indices:
             self.periods = []
-            self.metrics_agg = {}
-            self._render_metrics_tab()
+            self.periods_raw = []
+            self.period_original_indices = []
+            self._render_periods_tab()
             self._update_overlay_plot()
             return
 
-        # Also slice RAW (ambient-corrected/raw) periods on the same indices
-        periods_raw = slice_periods(t, y_base, self.seg_info.indices)
+        removed = self.removed_periods
+        kept_indices = [ij for k, ij in enumerate(self.seg_info.indices, start=1) if k not in removed]
+        self.period_original_indices = [k for k, ij in enumerate(self.seg_info.indices, start=1) if k not in removed]
 
-        if not self.periods or len(self.periods) == 0:
-            self.metrics_agg = {}
-            self._render_metrics_tab(); self._update_overlay_plot()
+        if not kept_indices:
+            self.periods = []
+            self.periods_raw = []
+            self._render_periods_tab()
+            self._update_overlay_plot()
             return
-    
-        # Metrics
-        per_f = metrics_for_periods(self.periods) or []
-        per_r = metrics_for_periods(periods_raw) or []
-        agg_f = aggregate_metrics(per_f) if per_f else {}
-        agg_r = aggregate_metrics(per_r) if per_r else {}
-        self._render_metrics_tab_from_aggs(agg_r, agg_f)
 
-        # Merge both into a flat dict for rendering/export
-        #self.metrics_period = {"filtered": per_f, "raw": per_r}
-        keys = sorted(set(k.split("_")[0] for k in list(agg_f.keys())+list(agg_r.keys())))
-        self.metrics_agg = {}
-        for base in keys:
-            self.metrics_agg[f"{base}_raw_mean"]  = agg_r.get(f"{base}_mean",  float("nan"))
-            self.metrics_agg[f"{base}_raw_std"]   = agg_r.get(f"{base}_std",   float("nan"))
-            self.metrics_agg[f"{base}_filt_mean"] = agg_f.get(f"{base}_mean",  float("nan"))
-            self.metrics_agg[f"{base}_filt_std"]  = agg_f.get(f"{base}_std",   float("nan"))
-        self._render_metrics_tab()
+        # slice on SAME indices for both series
+        self.periods = slice_periods(t, y_det, kept_indices)
+        self.periods_raw = slice_periods(t, y_base, kept_indices)
 
         # Build spans for visual "to be removed" preview (edges + future selections)
         spans = []
@@ -264,27 +265,23 @@ class App(tk.Tk):
             # right appendix
             _, jlast = self.seg_info.indices[-1]
             spans.append((self.t_raw[jlast], self.t_raw[-1]))
-            # TODO: add user-selected deletions here (period index -> (i,j))
+            # removed periods
+            for k in removed:
+                if 1 <= k <= len(self.seg_info.indices):
+                    i, j = self.seg_info.indices[k-1]
+                    spans.append((self.t_raw[i], self.t_raw[j]))
         self.sig_plot.set_removed_spans(spans)
         # For quick preview in the Periods tab, print a short summary
         self._render_periods_tab()
-        # Compute metrics
-        self.metrics_period = metrics_for_periods(self.periods)
-        self.metrics_agg = aggregate_metrics(self.metrics_period)
-        self._render_metrics_tab()
 
         # Build period boundaries for drawing (using indices from seg_info)
         bounds = []
         for p_idx, (i, j) in enumerate(self.seg_info.indices, start=1):
             bounds.append((self.t_raw[i], self.t_raw[j], p_idx))
-        self.sig_plot.set_period_boundaries(bounds, removed=getattr(self, "removed_periods", set()))
+        self.sig_plot.set_period_boundaries(bounds, removed=self.removed_periods)
 
+        # refresh overlay (uses self.periods)
         self._update_overlay_plot()
-
-        # TODO: deprecate this func in favor of separate calls
-        self.recompute_periods()
-        self.compute_metrics_aggregates()
-
 
     def _render_periods_tab(self):
         self.periods_text.delete("1.0", "end")
@@ -292,9 +289,9 @@ class App(tk.Tk):
             self.periods_text.insert("end", "No periods yet. Detect peaks first.")
             return
         lines = []
-        for k, (t_seg, y_seg) in enumerate(self.periods, start=1):
+        for orig_k, (t_seg, y_seg) in zip(self.period_original_indices, self.periods):
             dur = t_seg[-1] - t_seg[0]
-            lines.append(f"Period {k:02d}: N={len(t_seg)}  duration={dur:.3f}s")
+            lines.append(f"Period {orig_k:02d}: N={len(t_seg)}  duration={dur:.3f}s")
         self.periods_text.insert("end", "\n".join(lines))
 
 
@@ -307,7 +304,7 @@ class App(tk.Tk):
 
          
         # If we have no periods computed yet, show a helpful title
-        if not getattr(self, "periods", None) or len(self.periods) == 0:
+        if not self.periods or len(self.periods) == 0:
             ax.set_title("No periods yet — detect extrema first.")
             canvas.draw_idle()
             return
@@ -325,17 +322,14 @@ class App(tk.Tk):
             canvas.draw_idle()
             return
 
-        kept_rows, labels = self._kept_row_indices_and_labels()
-        if not kept_rows:
+        labels = [f"Period {k}" for k in self.period_original_indices]
+        if not labels:
             ax.set_title("All periods removed — nothing to display")
             canvas.draw_idle()
             return
 
-        # Select kept rows (by original order) so numbering matches Signal tab
-        X_kept = X[kept_rows, :]
-
         # Normalize and average
-        Xn = normalize_periods(X_kept, mode="baseline")
+        Xn = normalize_periods(X, mode="baseline")
         mu, sd = average_period(Xn)
 
         # Draw overlay
@@ -351,90 +345,6 @@ class App(tk.Tk):
         #canvas.draw_idle()
     
 
-    def _kept_row_indices_and_labels(self):
-        """
-        Returns:
-        kept_rows: list[int]     -- 0-based row indices into self.periods / resampled matrix
-        labels:    list[str]     -- e.g., ["Period 1", "Period 3", ...] using original numbering
-        Uses self.seg_info.indices order (1..N). Skips self.removed_periods if present.
-        """
-        kept_rows, labels = [], []
-        if not getattr(self, "seg_info", None) or not self.seg_info.indices:
-            return kept_rows, labels
-
-        removed = getattr(self, "removed_periods", set())  # {1-based indices}
-        for row_idx_0, (_ij) in enumerate(self.seg_info.indices):
-            k = row_idx_0 + 1  # 1-based label, consistent with Signal tab
-            if k in removed:
-                continue
-            kept_rows.append(row_idx_0)
-            labels.append(f"Period {k}")
-        return kept_rows, labels
-
-
-    def _render_metrics_tab(self):
-        # Clear
-        for row in self.metrics_tree.get_children(): self.metrics_tree.delete(row)
-        if not self.metrics_agg: return
-        # Only render metrics that have at least one non-NaN value
-        bases = sorted(set(k.rsplit("_", 2)[0] for k in self.metrics_agg.keys()))
-        for base in bases:
-            row = (
-                base,
-                self.metrics_agg.get(f"{base}_raw_mean", float("nan")),
-                self.metrics_agg.get(f"{base}_raw_std", float("nan")),
-                self.metrics_agg.get(f"{base}_filt_mean", float("nan")),
-                self.metrics_agg.get(f"{base}_filt_std", float("nan")),
-            )
-            if all((isinstance(v, float) and (v != v)) for v in row[1:]):  # all NaN
-                continue
-            self.metrics_tree.insert("", "end", values=(row[0], *(f"{v:.6g}" for v in row[1:])))
-        
-        # Deprecate this func
-        agg_r = getattr(self, "metrics_agg_raw", {})
-        agg_f = getattr(self, "metrics_agg_filt", {})
-        self._render_metrics_tab_from_aggs(agg_r, agg_f)
-    
-    
-    
-    ##################
-    # NEW, separate function, just periods
-    def recompute_periods(self):
-        """
-        Build kept periods for the analysis signal (filtered if available) and for the raw baseline,
-        using the current segmentation indices and removed_periods set. Also updates the Overlay tab.
-        Produces: self.periods        (list of (t_i, y_i) or as your segment.py returns inside slice_periods)
-                self.periods_raw    (same indices, raw baseline)
-        """
-        # need segmentation indices
-        if not getattr(self, "seg_info", None) or not self.seg_info.indices:
-            self.periods = []
-            self.periods_raw = []
-            self._update_overlay_plot()
-            return
-
-        # choose series
-        t, y_base = self._current_signal()
-        y_det = self.y_filt if (self.y_filt is not None) else y_base
-
-        # keep-by-index respecting removed_periods (1-based)
-        removed = getattr(self, "removed_periods", set())
-        kept_indices = [ij for k, ij in enumerate(self.seg_info.indices, start=1) if k not in removed]
-        if not kept_indices:
-            self.periods = []
-            self.periods_raw = []
-            self._update_overlay_plot()
-            return
-
-        # slice on SAME indices for both series
-        self.periods = slice_periods(t, y_det, kept_indices)
-        self.periods_raw = slice_periods(t, y_base, kept_indices)
-
-        # refresh overlay (uses self.periods)
-        self._update_overlay_plot()
-        #
-
-    # app.py
     def compute_metrics_aggregates(self):
         """
         Use metrics.py to compute per-period metrics for filtered and raw,
@@ -443,7 +353,7 @@ class App(tk.Tk):
         Produces: self.metrics_agg_raw, self.metrics_agg_filt
         """
         # if no periods, clear table
-        if not getattr(self, "periods", None):
+        if not self.periods:
             self.metrics_agg_raw = {}
             self.metrics_agg_filt = {}
             self._render_metrics_tab_from_aggs(self.metrics_agg_raw, self.metrics_agg_filt)
@@ -521,7 +431,7 @@ class App(tk.Tk):
         def fmt(x):
             if x is None or (isinstance(x, float) and math.isnan(x)):
                 return "—"
-            return f"{x:.4g}"
+            return f"{x:.6g}"
 
         for base in order:
             rmu, rsd = norm_r.get(base, (float("nan"), float("nan")))
@@ -561,10 +471,12 @@ class App(tk.Tk):
             pd.DataFrame({"period": list(range(1,len(durs)+1)), "duration_s": durs}).to_excel(writer, sheet_name="Periods", index=False)
 
             # Metrics (per-period)
-            pd.DataFrame(self.metrics_period).to_excel(writer, sheet_name="Metrics_Period", index=False)
+            pd.DataFrame(metrics_for_periods(self.periods_raw)).to_excel(writer, sheet_name="Metrics_Period_Raw", index=False)
+            pd.DataFrame(metrics_for_periods(self.periods)).to_excel(writer, sheet_name="Metrics_Period_Filt", index=False)
 
             # Metrics aggregated
-            pd.DataFrame([self.metrics_agg]).to_excel(writer, sheet_name="Metrics_Aggregated", index=False)
+            pd.DataFrame([self.metrics_agg_raw]).to_excel(writer, sheet_name="Metrics_Aggregated_Raw", index=False)
+            pd.DataFrame([self.metrics_agg_filt]).to_excel(writer, sheet_name="Metrics_Aggregated_Filt", index=False)
 
             # NEW: Resampled periods and average (from current analysis signal)
             X, tau = resample_periods(self.periods, n_points=200)
@@ -585,14 +497,14 @@ class App(tk.Tk):
         plt.plot(t, y_base, label="Raw" if self.y_corr is None else "Ambient-corrected", lw=1.0, alpha=0.7)
         if self.y_filt is not None:
             plt.plot(t, self.y_filt, label=f"Filtered (S={self.filter_engine.smoothing_level})", lw=1.2)
-        plt.legend(bbox_to_anchor=(1.0, 1.3), loc="upper right"); 
+        plt.legend(bbox_to_anchor=(1.0, 1.35), loc="upper right"); 
         plt.xlabel("Time (s)"); plt.ylabel("Signal"); plt.tight_layout()
         fig1.savefig(base + "_signal.png", dpi=160)
         plt.close(fig1)
 
         # 2) Overlaid resampled periods + average
         try:
-            if getattr(self, "periods", None) and len(self.periods) > 0:
+            if self.periods and len(self.periods) > 0:
                 res = resample_periods(self.periods, n_points=200)
                 try:
                     X, tau = res
@@ -600,10 +512,9 @@ class App(tk.Tk):
                     X = res
                     tau = np.linspace(0.0, 1.0, X.shape[1])
 
-                kept_rows, labels = self._kept_row_indices_and_labels()
-                if kept_rows:
-                    X_kept = X[kept_rows, :]
-                    Xn = normalize_periods(X_kept, mode="baseline")
+                labels = [f"Period {k}" for k in self.period_original_indices]
+                if labels:
+                    Xn = normalize_periods(X, mode="baseline")
                     mu, sd = average_period(Xn)
 
                 fig2 = plt.figure(figsize=(8,3))
@@ -622,7 +533,7 @@ class App(tk.Tk):
             "smoothing_level": self.filter_engine.smoothing_level,
             "peaks_min": self.peaks_min.tolist(),
             "peaks_max": self.peaks_max.tolist(),
-            "removed_periods": [],  # future: track brushed removals
+            "removed_periods": list(self.removed_periods),
             "meta_ambient": self.meta_amb,
             "n_periods": len(self.periods),
         }
