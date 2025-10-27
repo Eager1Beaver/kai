@@ -4,32 +4,31 @@ kai.metrics
 -----------
 APD metrics and shape features for calcium-like periodic signals.
 
-Design
-------
-Operate on **per-period raw segments** (t_seg, y_seg). For APDxx, we use the
-standard "level crossing" definition with respect to a baseline and a peak:
-- baseline: default = min value within the first 10% of samples (robust to drift)
-- peak: global max within the period
-- APD_p is defined between the **upstroke** crossing at level p and the **downstroke**
-  crossing at level p, where p ∈ {0.2, 0.5, 0.9} for APD20/50/90.
-Crossing times are linearly interpolated in time.
+Design:
+    Operate on **per-period raw segments** (t_seg, y_seg). For APDxx, we use the
+    standard "level crossing" definition with respect to a baseline and a peak:
+        - baseline: default = min value within the first 10% of samples (robust to drift)
+        - peak: global max within the period
+        - APD_p is defined between the **upstroke** crossing at level p and the **downstroke**
+        crossing at level p, where p ∈ {0.2, 0.5, 0.9} for APD20/50/90.
+    Crossing times are linearly interpolated in time.
 
-We also provide shape features:
-- time_to_peak (s), rise_10_90 (s), decay_90_10 (s)
-- max upstroke slope (units/s) and its angle (deg) on a [0,1] normalized amplitude
-- max downstroke slope (negative) and its angle (deg) on a [0,1] normalized amplitude
-- area_under_curve above baseline (units·s) using trapezoidal rule
+Provided shape features:
+    - time_to_peak (s), rise_10_90 (s), decay_90_10 (s)
+    - max upstroke slope (units/s) and its angle (deg) on a [0,1] normalized amplitude
+    - max downstroke slope (negative) and its angle (deg) on a [0,1] normalized amplitude
+    - area_under_curve above baseline (units*s) using trapezoidal rule
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, asdict
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
-# --------- Utilities ---------
+# Utilities ---------
 
 def _as_1d(a) -> np.ndarray:
     return np.asarray(a, dtype=float).reshape(-1)
+
 
 def _central_diff(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     """Central difference derivative dy/dt with forward/backward ends."""
@@ -40,8 +39,10 @@ def _central_diff(t: np.ndarray, y: np.ndarray) -> np.ndarray:
     dy[-1] = (y[-1] - y[-2]) / (t[-1] - t[-2])
     return dy
 
+
 def _level_value(baseline: float, peak: float, p: float) -> float:
     return baseline + p * (peak - baseline)
+
 
 def _find_crossing_time(t: np.ndarray, y: np.ndarray, level: float, direction: str) -> Optional[float]:
     """
@@ -71,6 +72,7 @@ def _find_crossing_time(t: np.ndarray, y: np.ndarray, level: float, direction: s
     frac = (level - y0) / (y1 - y0)
     return float(t0 + frac * (t1 - t0))
 
+
 def _baseline_peak(t: np.ndarray, y: np.ndarray, *, first_frac: float = 0.1) -> Tuple[float, float, int]:
     """Baseline = min(y) within first_frac of samples; peak = global max; also return index of peak."""
     n = len(y)
@@ -81,11 +83,8 @@ def _baseline_peak(t: np.ndarray, y: np.ndarray, *, first_frac: float = 0.1) -> 
     peak = float(y[peak_idx])
     return baseline, peak, peak_idx
 
-def _safe_div(a: float, b: float) -> float:
-    return float(a) / float(b) if b != 0 else float('nan')
 
-# --------- APD metrics per period ---------
-
+# APD metrics per period
 def apd_metrics_for_period(t: np.ndarray, y: np.ndarray, levels: Sequence[float] = (0.2, 0.5, 0.9)) -> Dict[str, float]:
     """
     Compute APDxx for a single period segment (t,y).
@@ -113,8 +112,8 @@ def apd_metrics_for_period(t: np.ndarray, y: np.ndarray, levels: Sequence[float]
         out[key] = (tdn - tup) if (tup is not None and tdn is not None and tdn >= tup) else np.nan
     return out
 
-# --------- Shape metrics per period ---------
 
+# Shape metrics per period
 def shape_metrics_for_period(t: np.ndarray, y: np.ndarray) -> Dict[str, float]:
     """
     Compute shape features: time_to_peak, rise/decay times, slopes/angles, area.
@@ -153,7 +152,7 @@ def shape_metrics_for_period(t: np.ndarray, y: np.ndarray) -> Dict[str, float]:
     upstroke_max_slope = float(np.max(dy[:peak_idx+1])) if peak_idx >= 0 else float('nan')
     downstroke_min_slope = float(np.min(dy[peak_idx:])) if peak_idx < len(dy) else float('nan')
 
-    # Normalize amplitude to [0,1] for angle calculation, use same t (seconds)
+    # Normalize amplitude to [0,1] for angle calculation
     amp = peak - baseline
     y_norm = (y - baseline) / amp if amp != 0 else np.zeros_like(y)
     dy_norm = _central_diff(t, y_norm)
@@ -162,7 +161,7 @@ def shape_metrics_for_period(t: np.ndarray, y: np.ndarray) -> Dict[str, float]:
     downstroke_angle_deg = float(np.degrees(np.arctan(np.min(dy_norm[peak_idx:])))) if peak_idx < len(dy_norm) else float('nan')
 
     # area under curve above baseline
-    auc = float(np.trapz(np.clip(y - baseline, 0, None), t))
+    auc = float(np.trapzoid(np.clip(y - baseline, 0, None), t))
 
     return {
         "time_to_peak": ttp,
@@ -175,8 +174,8 @@ def shape_metrics_for_period(t: np.ndarray, y: np.ndarray) -> Dict[str, float]:
         "auc_above_baseline": auc,
     }
 
-# --------- Batch & aggregation ---------
 
+# Aggregation
 def metrics_for_periods(periods: Sequence[Tuple[np.ndarray, np.ndarray]]) -> List[Dict[str, float]]:
     """
     Compute metrics dict per (t_seg, y_seg).
@@ -188,6 +187,7 @@ def metrics_for_periods(periods: Sequence[Tuple[np.ndarray, np.ndarray]]) -> Lis
         m.update(shape_metrics_for_period(t_seg, y_seg))
         out.append(m)
     return out
+
 
 def aggregate_metrics(period_metrics: Sequence[Dict[str, float]]) -> Dict[str, float]:
     """

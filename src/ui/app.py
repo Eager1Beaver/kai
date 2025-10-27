@@ -4,9 +4,7 @@ from tkinter import ttk, filedialog, messagebox
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import math
-
 
 # Ensure TkAgg backend for interactive use
 import matplotlib
@@ -64,12 +62,13 @@ class App(tk.Tk):
             on_apply_offset_scale=self.apply_offset_scale,
             on_smooth_changed=self.on_smooth_changed,
             on_set_pacing=self.on_set_pacing,
-        )
+            )
         self.sidebar.grid(row=0, column=0, sticky="nsw")
 
         self.tabs = Tabs(self)
         self.tabs.grid(row=0, column=1, sticky="nsew")
-        # Signal tab -> SignalPlot
+
+        # Signal tab
         self.sig_plot = SignalPlot(self.tabs.signal_frame, on_click_peak=self.on_click_peak)
         self.sig_plot.get_widget().pack(fill="both", expand=True)
 
@@ -81,7 +80,7 @@ class App(tk.Tk):
         self.metrics_tree = ttk.Treeview(
             self.tabs.metrics_frame, 
             columns=("metric","raw_mean","raw_std","filt_mean","filt_std"), 
-            show="headings", height=12
+            show="headings", height=12,
             )
         for col,title,w in [
         ("metric","Metric",240),
@@ -91,22 +90,16 @@ class App(tk.Tk):
         ("filt_std","Filt std",110)]:
             self.metrics_tree.heading(col, text=title)
             self.metrics_tree.column(col, width=w, anchor="center" if col!="metric" else "w")
-
-        '''self.metrics_tree.heading("metric", text="Metric")
-        self.metrics_tree.heading("mean", text="Mean")
-        self.metrics_tree.heading("std", text="Std")
-        self.metrics_tree.column("metric", width=240, anchor="w")
-        self.metrics_tree.column("mean", width=120, anchor="center")
-        self.metrics_tree.column("std", width=120, anchor="center")'''
         self.metrics_tree.pack(fill="both", expand=True, padx=6, pady=6)
     
 
-    # ---------- UI Style ----------
+    # UI Style 
     def _build_styles(self):
         style = ttk.Style(self)
         style.configure("Heading.TLabel", font=("TkDefaultFont", 10, "bold"))
 
-    # ---------- File IO ----------
+
+    # File IO
     def load_raw(self):
         path = filedialog.askopenfilename(title="Select raw CSV/XLSX", filetypes=[("CSV","*.csv"), ("Excel","*.xlsx *.xls"), ("All","*.*")])
         if not path:
@@ -115,6 +108,7 @@ class App(tk.Tk):
         self.t_raw, self.y_raw = t, y
         self.sidebar.status.config(text=f"Loaded raw: {os.path.basename(path)} ({info.n_rows} rows)")
         self.refresh_signal()
+
 
     def load_ambient(self):
         path = filedialog.askopenfilename(title="Select ambient CSV/XLSX", filetypes=[("CSV","*.csv"), ("Excel","*.xlsx *.xls"), ("All","*.*")])
@@ -125,6 +119,7 @@ class App(tk.Tk):
         self.sidebar.status.config(text=f"Loaded ambient: {os.path.basename(path)} ({info.n_rows} rows)")
         self.apply_offset_scale(self.sidebar.offset_var.get(), self.sidebar.scale_var.get())
 
+
     def on_set_pacing(self, hz: float):
         self.pacing_hz_manual = float(hz) if hz and hz > 0 else None
         msg = f"Current: {self.pacing_hz_manual:.3g} Hz" if self.pacing_hz_manual else "Current: auto"
@@ -134,10 +129,12 @@ class App(tk.Tk):
             pass
         self.refresh_signal(live=False)
 
+
     def _pacing_hint(self):
         return self.pacing_hz_manual    
 
-    # ---------- Processing ----------
+
+    # Processing
     def apply_offset_scale(self, offset_ms: float, scale: float):
         if self.t_raw is None or self.y_raw is None or self.t_amb is None or self.y_amb is None:
             self.sidebar.status.config(text="Load raw and ambient first")
@@ -147,13 +144,16 @@ class App(tk.Tk):
         self.sidebar.status.config(text=f"Ambient subtracted (offset={meta['offset_ms']} ms, scale={meta['scale']})")
         self.refresh_signal()
 
+
     def on_smooth_changed(self, S: int):
         self.filter_engine.set_level(int(S))
         self.refresh_signal(live=True)    
 
+
     def _current_signal(self):
         # Prefer ambient-corrected if available
         return (self.t_raw, self.y_corr if self.y_corr is not None else self.y_raw)
+
 
     def refresh_signal(self, live: bool = False):
         if self.t_raw is None or self.y_raw is None:
@@ -165,7 +165,6 @@ class App(tk.Tk):
             self.y_filt = None
         else:
             self.y_filt = self.filter_engine.apply(t, y, pacing_freq_hz=self._pacing_hint())
-            #self.y_filt = self.filter_engine.apply(t, y, pacing_freq_hz=None)
         self.sig_plot.set_filter_label(f"Filtered (S={S})")    
         self.sig_plot.set_data(t, y, self.y_filt)
         # keep peaks visual if any
@@ -173,13 +172,13 @@ class App(tk.Tk):
         if not live:
             self.sidebar.status.config(text=f"Updated view (S={S})")
 
+
     def detect_peaks(self):
         if self.t_raw is None or self.y_raw is None:
             self.sidebar.status.config(text="Load raw first")
             return
         t, y_base = self._current_signal()
         y_for_det = self.y_filt if (self.y_filt is not None) else y_base
-        #det = find_peaks_adaptive(t, y, fp_hint=None, prefer="max")
         det = find_peaks_adaptive(t, y_for_det, fp_hint=self._pacing_hint(), prefer="max")
         self.peaks_min, self.peaks_max = det.peaks_min, det.peaks_max
         self.sig_plot.set_peaks(self.peaks_min, self.peaks_max)
@@ -187,10 +186,12 @@ class App(tk.Tk):
         self.recompute_periods()
         self.compute_metrics_aggregates()
 
+
     def toggle_edit(self):
         self.edit_mode = not self.edit_mode
         self.sig_plot.enable_edit(self.edit_mode)
         self.sidebar.status.config(text=f"Edit mode: {'ON' if self.edit_mode else 'OFF'}")
+
 
     def on_click_peak(self, x_click: float):
         """Snap click to nearest extremum and toggle it (add/remove) in the appropriate set."""
@@ -218,15 +219,13 @@ class App(tk.Tk):
         self.recompute_periods()
         self.compute_metrics_aggregates()
 
+
     # ---------- Periods & Metrics ----------
     def recompute_periods(self):
         """
         Build kept periods for the analysis signal (filtered if available) and for the raw baseline,
         using the current segmentation indices and removed_periods set. Also updates the Overlay tab.
-        Produces: self.periods        (list of (t_i, y_i) or as your segment.py returns inside slice_periods)
-                self.periods_raw    (same indices, raw baseline)
         """
-        # need segmentation indices
         if self.t_raw is None or self.y_raw is None:
             return
         t, y_base = self._current_signal()
@@ -252,7 +251,7 @@ class App(tk.Tk):
             self._update_overlay_plot()
             return
 
-        # slice on SAME indices for both series
+        # slice on same indices for both series
         self.periods = slice_periods(t, y_det, kept_indices)
         self.periods_raw = slice_periods(t, y_base, kept_indices)
 
@@ -280,8 +279,9 @@ class App(tk.Tk):
             bounds.append((self.t_raw[i], self.t_raw[j], p_idx))
         self.sig_plot.set_period_boundaries(bounds, removed=self.removed_periods)
 
-        # refresh overlay (uses self.periods)
+        # refresh overlay
         self._update_overlay_plot()
+
 
     def _render_periods_tab(self):
         self.periods_text.delete("1.0", "end")
@@ -302,47 +302,47 @@ class App(tk.Tk):
         canvas = self.tabs.overlay_canvas
         ax.clear()
 
-         
         # If we have no periods computed yet, show a helpful title
         if not self.periods or len(self.periods) == 0:
-            ax.set_title("No periods yet — detect extrema first.")
+            ax.set_title("No periods yet - detect extrema first.")
             canvas.draw_idle()
             return
 
-        # Resample current analysis signal periods (filtered if available)
-        res = resample_periods(self.periods, n_points=200)
         try:
-            X, tau = res
-        except Exception:
-            X = res
-            tau = np.linspace(0.0, 1.0, X.shape[1])
+            # Resample current analysis signal periods (filtered if available)
+            res = resample_periods(self.periods, n_points=200)
+            try:
+                X, tau = res
+            except Exception:
+                X = res
+                tau = np.linspace(0.0, 1.0, X.shape[1])
 
-        if X is None or len(X) == 0:
-            ax.set_title("No periods to display")
+            if X is None or len(X) == 0:
+                ax.set_title("No periods to display")
+                canvas.draw_idle()
+                return
+
+            labels = [f"Period {k}" for k in self.period_original_indices]
+            if not labels:
+                ax.set_title("All periods removed - nothing to display")
+                canvas.draw_idle()
+                return
+
+            # Normalize and average
+            Xn = normalize_periods(X, mode="baseline")
+            mu, sd = average_period(Xn)
+
+            # Draw overlay
+            draw_periods_overlay(ax, tau, Xn, mu, sd, labels=labels, labeled_max=12)
+
             canvas.draw_idle()
-            return
 
-        labels = [f"Period {k}" for k in self.period_original_indices]
-        if not labels:
-            ax.set_title("All periods removed — nothing to display")
+        except Exception as e:
+            # Show error on the canvas to aid debugging
+            ax.clear()
+            ax.text(0.02, 0.95, f"Overlay error:\n{e}", transform=ax.transAxes,
+                    va="top", ha="left", fontsize=9, color="crimson")
             canvas.draw_idle()
-            return
-
-        # Normalize and average
-        Xn = normalize_periods(X, mode="baseline")
-        mu, sd = average_period(Xn)
-
-        # Draw overlay
-        draw_periods_overlay(ax, tau, Xn, mu, sd, labels=labels, labeled_max=12)
-
-        canvas.draw_idle()
-
-    
-        # Fail-safe: show error on the canvas to aid debugging (optional)
-        #ax.clear()
-        #ax.text(0.02, 0.95, f"Overlay error:\n{e}", transform=ax.transAxes,
-        #        va="top", ha="left", fontsize=9, color="crimson")
-        #canvas.draw_idle()
     
 
     def compute_metrics_aggregates(self):
@@ -359,8 +359,6 @@ class App(tk.Tk):
             self._render_metrics_tab_from_aggs(self.metrics_agg_raw, self.metrics_agg_filt)
             return
 
-        # Use your already-imported metrics.py API
-
         per_f = metrics_for_periods(self.periods) or []
         per_r = metrics_for_periods(self.periods_raw) or []
         agg_f = aggregate_metrics(per_f) if per_f else {}
@@ -370,13 +368,13 @@ class App(tk.Tk):
         self.metrics_agg_filt = agg_f
 
         self._render_metrics_tab_from_aggs(agg_r, agg_f)
-        #
 
-    #
+    
     def _clear_metrics_table(self):
         if hasattr(self, "metrics_tree"):
             for row in self.metrics_tree.get_children():
                 self.metrics_tree.delete(row)
+
 
     def _normalize_agg(self, agg):
         """
@@ -404,13 +402,12 @@ class App(tk.Tk):
                     std = v
                     cur = out.get(base, (float("nan"), float("nan")))
                     out[base] = (cur[0], std)
-                # ignore other keys if any
         return out
+
 
     def _render_metrics_tab_from_aggs(self, agg_raw, agg_filt):
         """
-        agg_raw / agg_filt: whatever your metrics.py returns; we normalize them
-        and fill the table with columns: Metric | Raw mean | Raw std | Filt mean | Filt std
+        Fill the table with columns: Metric | Raw mean | Raw std | Filt mean | Filt std
         """
         self._clear_metrics_table()
         if not hasattr(self, "metrics_tree"):
@@ -422,7 +419,7 @@ class App(tk.Tk):
         if not bases:
             return
 
-        # optional ordering: put common electrophys metrics first
+        # optional ordering: put common metrics first
         priority = ["APD20","APD50","APD90","rise_10_90","decay_90_10",
                     "time_to_peak","upstroke_angle_deg","downstroke_angle_deg",
                     "auc_above_baseline","duration_s","amp_mean","amp_std","amp_peak","amp_min","amp_range","slope_max","slope_min"]
@@ -431,22 +428,22 @@ class App(tk.Tk):
         def fmt(x):
             if x is None or (isinstance(x, float) and math.isnan(x)):
                 return "—"
-            return f"{x:.6g}"
+            return f"{x:.4g}"
 
         for base in order:
             rmu, rsd = norm_r.get(base, (float("nan"), float("nan")))
             fmu, fsd = norm_f.get(base, (float("nan"), float("nan")))
-            # if literally everything is NaN, skip
+            # if everything is NaN, skip
             if all(isinstance(v, float) and math.isnan(v) for v in (rmu, rsd, fmu, fsd)):
                 continue
             self.metrics_tree.insert(
                 "", "end",
                 values=(base, fmt(rmu), fmt(rsd), fmt(fmu), fmt(fsd))
-            )
-            #    
+                )
+    #    
             
 
-    # ---------- Export ----------
+    # Export
     def export_all(self):
         if self.t_raw is None or self.y_raw is None or not self.periods:
             messagebox.showinfo("Export", "Nothing to export yet.")
@@ -463,7 +460,7 @@ class App(tk.Tk):
                 "ambient_offset_ms": self.meta_amb.get("offset_ms"),
                 "ambient_scale": self.meta_amb.get("scale"),
                 "n_periods": len(self.periods),
-            }
+                }
             pd.DataFrame([params]).to_excel(writer, sheet_name="Parameters", index=False)
 
             # Periods sheet (durations)
@@ -478,7 +475,7 @@ class App(tk.Tk):
             pd.DataFrame([self.metrics_agg_raw]).to_excel(writer, sheet_name="Metrics_Aggregated_Raw", index=False)
             pd.DataFrame([self.metrics_agg_filt]).to_excel(writer, sheet_name="Metrics_Aggregated_Filt", index=False)
 
-            # NEW: Resampled periods and average (from current analysis signal)
+            # Resampled periods and average
             X, tau = resample_periods(self.periods, n_points=200)
             Xn = normalize_periods(X, mode="baseline")
             mu, sd = average_period(Xn)
@@ -490,7 +487,7 @@ class App(tk.Tk):
             df_res.to_excel(writer, sheet_name="Resampled_Periods", index=False)
             #
 
-        # NEW: save figures alongside the xlsx
+        # Save figures alongside the xlsx
         # 1) Raw vs filtered
         fig1 = plt.figure(figsize=(8,3))
         t, y_base = self._current_signal()
@@ -517,7 +514,7 @@ class App(tk.Tk):
                     Xn = normalize_periods(X, mode="baseline")
                     mu, sd = average_period(Xn)
 
-                fig2 = plt.figure(figsize=(8,3))
+                fig2 = plt.figure(figsize=(5,4))
                 ax2 = fig2.add_subplot(111)
 
                 draw_periods_overlay(ax2, tau, Xn, mu, sd, labels=labels, labeled_max=12)
@@ -525,7 +522,6 @@ class App(tk.Tk):
                 plt.close(fig2)  
 
         except Exception as e:
-            # optional: log but don't crash export
             print("Export overlay failed:", e)    
 
         # Also dump a session.json alongside
@@ -536,7 +532,7 @@ class App(tk.Tk):
             "removed_periods": list(self.removed_periods),
             "meta_ambient": self.meta_amb,
             "n_periods": len(self.periods),
-        }
+            }
         try:
             with open(os.path.splitext(path)[0] + "_session.json", "w", encoding="utf-8") as f:
                 json.dump(session, f, indent=2)
@@ -544,9 +540,12 @@ class App(tk.Tk):
             pass
         self.sidebar.status.config(text=f"Exported: {os.path.basename(path)}")
 
+
 def main():
     app = App()
     app.mainloop()
 
+
 if __name__ == "__main__":
     main()
+    

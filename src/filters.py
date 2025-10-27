@@ -67,13 +67,13 @@ class FilterEngine:
             raise ValueError("S must be in [0, 5]")
         self.smoothing_level = S
 
-    # --- Public API -----------------------------------------------------
+    # API
     def apply(
         self,
         t: np.ndarray,
         y: np.ndarray,
         pacing_freq_hz: Optional[float] = None,
-    ) -> np.ndarray:
+        ) -> np.ndarray:
         """
         Apply smoothing to y given timestamps t.
 
@@ -108,7 +108,7 @@ class FilterEngine:
         self._cache[key] = out.copy()
         return out
 
-    # --- Backends -------------------------------------------------------
+    # Backends
     def _apply_savgol(self, y: np.ndarray, fs: float, S: int) -> np.ndarray:
         cfg = self.config
         if S == 1:
@@ -129,12 +129,11 @@ class FilterEngine:
         fs: float,
         fp: Optional[float],
         S: int,
-    ) -> np.ndarray:
+        ) -> np.ndarray:
         cfg = self.config
         if fp is None or fp <= 0:
             # Fallback cutoff if pacing unknown: 0.15*Nyquist
             fc = 0.15 * (fs / 2.0)
-            # NEW: pick order by S so S=3 is modest, S=4 is heavier
             order = cfg.butter_order_s3 if S == 3 else cfg.butter_order_s4
         else:
             if S == 3:
@@ -160,7 +159,7 @@ class FilterEngine:
         out = np.convolve(ypad, k, mode="valid")
         return out
 
-    # --- Helpers --------------------------------------------------------
+    # Helpers
     @staticmethod
     def _infer_fs(t: np.ndarray) -> float:
         dt = np.diff(t)

@@ -1,9 +1,8 @@
-
 from __future__ import annotations
 import numpy as np
-from typing import Callable, Optional, Tuple, Sequence
+from typing import Callable, Optional, Sequence
 import matplotlib
-matplotlib.use("Agg")  # safe default; app.py can switch to TkAgg at runtime
+matplotlib.use("Agg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
@@ -112,18 +111,16 @@ class SignalPlot:
         self._raw_line, = self.ax.plot(self.t, self.y_raw, lw=1.0, alpha=0.7, label="Raw")
         if self.y_filt is not None:
             self._filt_line, = self.ax.plot(self.t, self.y_filt, lw=1.2, label=self._filt_legend_label)
-        #if self.y_filt is not None:
-        #    self._filt_line, = self.ax.plot(self.t, self.y_filt, lw=1.2, label="Filtered")
         if self.peaks_min.size > 0:
             self._min_scatter = self.ax.scatter(self.t[self.peaks_min], y_for_peaks[self.peaks_min],
                                                 s=18, c="tab:blue", marker="v", label="min")
         if self.peaks_max.size > 0:
             self._max_scatter = self.ax.scatter(self.t[self.peaks_max], y_for_peaks[self.peaks_max],
                                                 s=18, c="tab:orange", marker="^", label="max")
-        # then arrows for extrema
+        # Draw arrows for extrema
         if hasattr(self, "peaks_max") and hasattr(self, "peaks_min"):
             self._draw_extrema_arrows(self.t, y_for_peaks, self.peaks_max, self.peaks_min)    
-        # NEW: draw removed spans in light red under everything
+        # Draw removed spans in light red under everything
         for (t0, t1) in getattr(self, "_removed_spans", []):
             self.ax.axvspan(t0, t1, color="red", alpha=0.15, linewidth=0)
 
@@ -157,24 +154,23 @@ def draw_periods_overlay(ax, tau, Xn, mean, std, *, labels=None, labeled_max=12)
     """
     ax.clear()
 
-    # Guard for empty input
+    # In case of empty input
     if Xn is None or len(np.shape(Xn)) != 2 or Xn.shape[0] == 0:
         ax.set_title("No periods available")
         ax.figure.tight_layout()
         return
 
-    # draw individual periods
+    # Draw individual periods
     n = Xn.shape[0]
     for i in range(n):
         lbl = None
         if labels is not None and i < len(labels):
-            # honor explicit labels, but still cap by labeled_max
             lbl = labels[i] if i < labeled_max else None
         else:
             lbl = (f"Period {i+1}" if i < labeled_max else None)
         ax.plot(tau, Xn[i], alpha=0.35, lw=1.0, label=lbl)
 
-    # mean and ±std band
+    # Mean and \pm std band
     ax.plot(tau, mean, lw=1.8, label="Mean")
     if std is not None and np.all(np.isfinite(std)):
         ax.fill_between(tau, mean-std, mean+std, alpha=0.15, linewidth=0)
@@ -182,7 +178,7 @@ def draw_periods_overlay(ax, tau, Xn, mean, std, *, labels=None, labeled_max=12)
     ax.set_xlabel("Normalized time τ")
     ax.set_ylabel("Normalized amplitude")
     
-    # legend: place outside if many handles
+    # Place outside if many handles
     handles, labels = ax.get_legend_handles_labels()
     if handles:
         ax.legend(handles, labels, ncol=2, fontsize=9, frameon=True, loc="upper right")

@@ -3,24 +3,23 @@ scr.detect
 ----------
 Adaptive peak detection for periodic calcium-like signals + edit helpers.
 
-Features
---------
-- Robust sampling-rate estimation (median dt).
-- Optional pacing frequency estimation.
-- Adaptive peaks using MAD-based prominence and min-distance tied to pacing.
-- Returns alternating minima/maxima with basic invariants enforced.
-- Helpers to snap user clicks to local extrema and to add/remove peaks safely.
+Features:
+    - Robust sampling-rate estimation (median dt).
+    - Optional pacing frequency estimation.
+    - Adaptive peaks using MAD-based prominence and min-distance tied to pacing.
+    - Returns alternating minima/maxima with basic invariants enforced.
+    - Helpers to snap user clicks to local extrema and to add/remove peaks safely.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.signal import find_peaks
 
-# ---------------- Utilities ----------------
+# Utilities
 
 def estimate_fs(t: np.ndarray) -> float:
     """Estimate sampling rate (Hz) from time vector using median dt."""
@@ -42,7 +41,7 @@ def _mad(x: np.ndarray) -> float:
 def estimate_pacing(t: np.ndarray, y: np.ndarray, *, kind: str = "max") -> Optional[float]:
     """
     Roughly estimate pacing frequency by a two-pass approach:
-    1) quick peaks with generous thresholds; 2) median inter-peak interval.
+    1) quick peaks with thresholds; 2) median inter-peak interval.
 
     Returns
     -------
@@ -55,7 +54,7 @@ def estimate_pacing(t: np.ndarray, y: np.ndarray, *, kind: str = "max") -> Optio
         return None
 
     fs = estimate_fs(t)
-    # Generous thresholds: use small prominence relative to data spread
+    # Use small prominence relative to data spread
     prom = max(1e-9, 0.2 * _mad(y))  # very lenient
     distance = max(1, int(0.05 * fs))  # at least 50 ms apart
 
@@ -74,7 +73,7 @@ def estimate_pacing(t: np.ndarray, y: np.ndarray, *, kind: str = "max") -> Optio
     return 1.0 / med_T
 
 
-# ---------------- Core detection ----------------
+# Detection
 
 @dataclass
 class PeakResult:
@@ -91,7 +90,7 @@ def find_peaks_adaptive(
     fp_hint: Optional[float] = None,
     prefer: str = "max",
     width_ms: Optional[Tuple[float, float]] = None,
-) -> PeakResult:
+    ) -> PeakResult:
     """
     Adaptive peak detection producing alternating minima & maxima.
 
@@ -123,13 +122,13 @@ def find_peaks_adaptive(
         period_s = 1.0 / fp
         min_dist_samples = max(1, int(0.6 * period_s * fs))
     else:
-        # fallback: 150 ms
+        # 150 ms
         min_dist_samples = max(1, int(0.15 * fs))
 
     # Prominence threshold from noise estimate
     dy = np.diff(y)
     noise = _mad(dy) if len(dy) else _mad(y)
-    prom = max(1e-12, 2.5 * noise)  # scale factor chosen empirically
+    prom = max(1e-12, 2.5 * noise)  # scale factor
 
     # Width bounds (samples) if provided
     wmin, wmax = None, None
@@ -159,7 +158,6 @@ def find_peaks_adaptive(
 
     # Split back to min/max in order
     mins, maxs = [], []
-    expect = seq[0][0] if seq else None  # 'min' or 'max'
     for kind, idx in seq:
         if kind == "min":
             mins.append(idx)
@@ -176,8 +174,8 @@ def find_peaks_adaptive(
             "min_distance_samples": int(min_dist_samples),
             "n_max": int(len(peaks_max)),
             "n_min": int(len(peaks_min)),
-        },
-    )
+            },
+            )
 
 
 def _merge_alternating(primary: np.ndarray, secondary: np.ndarray, *, kind_first: str) -> List[Tuple[str, int]]:
@@ -216,8 +214,7 @@ def _merge_alternating(primary: np.ndarray, secondary: np.ndarray, *, kind_first
     return seq
 
 
-# ---------------- Edit helpers ----------------
-
+# Helpers
 def snap_to_local_extremum(t: np.ndarray, y: np.ndarray, x_click: float, *, radius_ms: float = 60.0) -> Tuple[int, str]:
     """
     Given a click time (x_click), return index of nearest local extremum within radius.
@@ -270,7 +267,7 @@ def remove_peak(peaks: np.ndarray, idx: int, *, tol: int = 0) -> np.ndarray:
 
 def enforce_alternation(peaks_min: np.ndarray, peaks_max: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Ensure sequences alternate in time; if not, greedily remove violations starting with the closer duplicate.
+    Ensure sequences alternate in time; if not, remove violations starting with the closer duplicate.
     """
     mins = np.asarray(peaks_min, dtype=int)
     maxs = np.asarray(peaks_max, dtype=int)
@@ -279,16 +276,16 @@ def enforce_alternation(peaks_min: np.ndarray, peaks_max: np.ndarray) -> Tuple[n
         return mins, maxs
     all_pts.sort(key=lambda x: x[0])
 
-    # Greedy pass: remove consecutive same-kind points keeping the stronger alternation
+    # Remove consecutive same-kind points keeping the stronger alternation
     cleaned = []
-    for kind_idx, (idx, kind) in enumerate(all_pts):
+    for _, (idx, kind) in enumerate(all_pts):
         if cleaned and cleaned[-1][1] == kind:
             # remove the closer duplicate (current or previous). Keep the one farther from neighbors.
             prev_idx, _ = cleaned[-1]
             # choose which to keep by distance to next different-kind (if available)
             keep_current = True  # default
             cleaned.pop()  # temporarily remove prev
-            # keep the one that maximizes spacing with neighbors (simple heuristic)
+            # keep the one that maximizes spacing with neighbors
             if cleaned:
                 left_gap_prev = prev_idx - cleaned[-1][0]
                 left_gap_curr = idx - cleaned[-1][0]
@@ -311,7 +308,7 @@ def enforce_alternation(peaks_min: np.ndarray, peaks_max: np.ndarray) -> Tuple[n
     return np.unique(mins_new), np.unique(maxs_new)
 
 
-# Smoke test using sample data: detect peaks and summarize.
+# Testing
 if __name__ == "__main__":
     import sys, json, numpy as np
     sys.path.append("data")
@@ -328,6 +325,6 @@ if __name__ == "__main__":
         if len(res.peaks_max) > 0:
             summary["first_peak_time"] = float(t_raw[res.peaks_max[0]])
     except Exception as e:
-        summary["error"] = str(e)
+        summary["detect_error"] = str(e)
 
     print(json.dumps(summary, indent=2))

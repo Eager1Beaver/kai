@@ -4,26 +4,24 @@ kai.segment
 -----------
 Period segmentation + normalization utilities.
 
-Goals
------
-- Build cycles (periods) from detected extrema (min/max).
-- Offer robust strategies: min→min or max→max cycles, with guard rails.
-- Produce per-period arrays and resample to a common grid for averaging/overlay.
-- Provide basic normalization options (baseline shift, amplitude scaling).
+Functionality:
+    - Build cycles (periods) from detected extrema (min/max).
+    - Offer robust strategies: min->min or max->max cycles, with guard rails.
+    - Produce per-period arrays and resample to a common grid for averaging/overlay.
+    - Provide basic normalization options (baseline shift, amplitude scaling).
 
-Key API
--------
-- build_period_indices(t, peaks_min, peaks_max, *, strategy="min2min")
-- slice_periods(t, y, idx_periods) -> List[Tuple[np.ndarray, np.ndarray]]
-- resample_periods(periods, *, n_points=200) -> (X, tau) where
-    X shape = (n_periods, n_points), tau in [0,1]
-- normalize_periods(X, *, mode="baseline", eps=1e-9) -> Xn
-- average_period(Xn) -> (mu, sigma)
+Key API:
+    - build_period_indices(t, peaks_min, peaks_max, *, strategy="min2min")
+    - slice_periods(t, y, idx_periods) -> List[Tuple[np.ndarray, np.ndarray]]
+    - resample_periods(periods, *, n_points=200) -> (X, tau) where
+        X shape = (n_periods, n_points), tau in [0,1]
+    - normalize_periods(X, *, mode="baseline", eps=1e-9) -> Xn
+    - average_period(Xn) -> (mu, sigma)
 """
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Sequence, Tuple
 import numpy as np
 
 
@@ -32,11 +30,11 @@ class SegmentationInfo:
     strategy: str                  # "min2min" or "max2max"
     n_periods: int
     dropped_edges: int             # periods dropped due to incomplete edges
-    durations: np.ndarray          # seconds (if t in seconds)
+    durations: np.ndarray          # seconds
     indices: List[Tuple[int,int]]  # (start_idx, end_idx) inclusive start, exclusive end
 
 
-# ---------------- Core segmentation ----------------
+# Segmentation
 
 def _sorted_unique(a: Iterable[int]) -> np.ndarray:
     a = np.asarray(list(a), dtype=int).ravel()
@@ -51,11 +49,11 @@ def build_period_indices(
     peaks_max: Sequence[int],
     *,
     strategy: str = "min2min",
-) -> SegmentationInfo:
+    ) -> SegmentationInfo:
     """
     Build (start,end) indices of periods according to strategy.
 
-    A period is defined as [anchor_k, anchor_{k+1}) where anchors are either
+    A period is defined as [extremum_k, extremum_{k+1}) where extrema are either
     consecutive minima ("min2min") or maxima ("max2max").
 
     Returns SegmentationInfo with durations and list of index pairs.
@@ -67,12 +65,12 @@ def build_period_indices(
     if strategy not in ("min2min", "max2max"):
         raise ValueError("strategy must be 'min2min' or 'max2max'")
 
-    anchors = mins if strategy == "min2min" else maxs
+    extrema = mins if strategy == "min2min" else maxs
     idx_periods: List[Tuple[int,int]] = []
 
-    # Need at least two anchors
-    if len(anchors) >= 2:
-        for a, b in zip(anchors[:-1], anchors[1:]):
+    # Need at least two extrema
+    if len(extrema) >= 2:
+        for a, b in zip(extrema[:-1], extrema[1:]):
             if b > a + 1:
                 idx_periods.append((int(a), int(b)))
     # Edge handling: ignore partial periods at edges by design
@@ -81,10 +79,10 @@ def build_period_indices(
     info = SegmentationInfo(
         strategy=strategy,
         n_periods=len(idx_periods),
-        dropped_edges=0 if len(anchors) < 2 else 0,  # keeping count field for future use
+        dropped_edges=0 if len(extrema) < 2 else 0,
         durations=durations,
         indices=idx_periods,
-    )
+        )
     return info
 
 
@@ -92,7 +90,7 @@ def slice_periods(
     t: np.ndarray,
     y: np.ndarray,
     idx_periods: Sequence[Tuple[int,int]],
-) -> List[Tuple[np.ndarray, np.ndarray]]:
+    ) -> List[Tuple[np.ndarray, np.ndarray]]:
     """
     Slice (t,y) into per-period arrays using [start,end) index pairs.
     """
@@ -107,7 +105,7 @@ def slice_periods(
     return out
 
 
-# ---------------- Resampling & normalization ----------------
+# Resampling & normalization
 
 def _resample_to_n_points(t: np.ndarray, y: np.ndarray, n_points: int) -> np.ndarray:
     """
@@ -127,7 +125,7 @@ def resample_periods(
     periods: Sequence[Tuple[np.ndarray, np.ndarray]],
     *,
     n_points: int = 200,
-) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Resample all periods to a common grid.
 
@@ -151,7 +149,7 @@ def normalize_periods(
     *,
     mode: str = "baseline",
     eps: float = 1e-9,
-) -> np.ndarray:
+    ) -> np.ndarray:
     """
     Normalize per-period arrays.
 
@@ -198,7 +196,7 @@ def average_period(X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return mu, sd
 
 
-# Smoke test: load sample, detect peaks, segment min->min, resample & average
+# Testing
 if __name__ == "__main__":
     import sys, json, numpy as np
     sys.path.append("/data")
@@ -223,6 +221,6 @@ if __name__ == "__main__":
             "first_duration_s": float(info.durations[0]) if len(info.durations) else None
         }
     except Exception as e:
-        summary["error"] = str(e)
+        summary["segment_error"] = str(e)
 
     print(json.dumps(summary, indent=2))

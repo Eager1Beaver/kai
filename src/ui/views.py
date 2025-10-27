@@ -2,6 +2,9 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+
 class Sidebar(ttk.Frame):
     def __init__(
             self, master, *, 
@@ -33,13 +36,16 @@ class Sidebar(ttk.Frame):
         ttk.Label(frm, text="Scale:").grid(row=1, column=0, sticky="w")
         self.scale_var = tk.DoubleVar(value=1.0)
         ttk.Entry(frm, textvariable=self.scale_var, width=8).grid(row=1, column=1, sticky="w", padx=(4,0))
-        ttk.Button(frm, text="Apply", command=lambda: on_apply_offset_scale(self.offset_var.get(), self.scale_var.get())).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
+        ttk.Button(frm, text="Apply", 
+                   command=lambda: on_apply_offset_scale(self.offset_var.get(), 
+                                                         self.scale_var.get()))\
+                                                            .grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4,0))
 
-        # NEW: pacing
+        # Set pacing
         pace = ttk.LabelFrame(self, text="Pacing (manual)", padding=6)
         pace.grid(row=4, column=0, sticky="ew", pady=(8,4))
         ttk.Label(pace, text="Hz:").grid(row=0, column=0, sticky="w")
-        self.pace_var = tk.DoubleVar(value=0.0)
+        self.pace_var = tk.DoubleVar(value=1.0)
         ttk.Entry(pace, textvariable=self.pace_var, width=8).grid(row=0, column=1, padx=(4,0), sticky="w")
         ttk.Button(pace, text="Use", command=lambda: on_set_pacing(self.pace_var.get())).grid(row=0, column=2, padx=(6,0))
         self.pace_status = ttk.Label(pace, text="Current: auto", foreground="#555")
@@ -55,19 +61,18 @@ class Sidebar(ttk.Frame):
         smooth_frame.grid_columnconfigure(0, weight=1)  # scale expands
         smooth_frame.grid_columnconfigure(1, weight=0)
 
-        self.smooth_label = ttk.Label(smooth_frame, text="S = 0") #
-        self.smooth_label.grid(row=0, column=1, sticky="e", padx=(8,0)) #
+        self.smooth_label = ttk.Label(smooth_frame, text="S = 0")
+        self.smooth_label.grid(row=0, column=1, sticky="e", padx=(8,0))
 
-        # Guard to avoid re-entrancy when we snap the thumb
+        # Avoid re-entrancy when snapping
         self._snapping = False
         
         self.scale = ttk.Scale(
             smooth_frame, from_=0, to=5, orient="horizontal", length=260,
-            command=lambda v: self._on_smooth_ui(v)
-        )
-        self.scale.grid(row=0, column=0, sticky="ew")
+            command=lambda v: self._on_smooth_ui(v))\
+                .grid(row=0, column=0, sticky="ew")
         
-        ttk.Label(self, text="0 = raw · 5 = heavy")\
+        ttk.Label(self, text="0 = raw . 5 = heavy")\
             .grid(row=7, column=0, sticky="w", pady=(2,0))
 
         # Actions
@@ -80,8 +85,9 @@ class Sidebar(ttk.Frame):
         self.status = ttk.Label(self, text="Ready.", anchor="w")
         self.status.grid(row=11, column=0, sticky="ew", pady=(12,0))
 
+
     def _on_smooth_ui(self, v):
-        # If we're snapping the thumb programmatically, ignore callbacks
+        # Ignore callbacks
         if self._snapping:
             return
 
@@ -111,27 +117,22 @@ class Sidebar(ttk.Frame):
                 self.after_idle(lambda: setattr(self, "_snapping", False))
         self.after_idle(_snap)
 
+
 class Tabs(ttk.Notebook):
     def __init__(self, master):
         super().__init__(master)
         self.signal_frame = ttk.Frame(self)
         self.periods_frame = ttk.Frame(self)
         self.metrics_frame = ttk.Frame(self)
+        self.overlay_frame = ttk.Frame(self)
 
         self.add(self.signal_frame, text="Signal")
         self.add(self.periods_frame, text="Periods")
-
-        # Overlay tab (between Periods and Metrics)
-        self.overlay_frame = ttk.Frame(self)
-        self.add(self.overlay_frame, text="Overlay")
+        self.add(self.overlay_frame, text="Overlay") 
+        self.add(self.metrics_frame, text="Metrics")       
 
         # Matplotlib canvas for overlay plot
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-        import matplotlib.pyplot as plt
-
         self.overlay_fig = plt.Figure(figsize=(7.5, 3.2), dpi=100)
         self.overlay_ax = self.overlay_fig.add_subplot(111)
         self.overlay_canvas = FigureCanvasTkAgg(self.overlay_fig, master=self.overlay_frame)
         self.overlay_canvas.get_tk_widget().pack(fill="both", expand=True)
-
-        self.add(self.metrics_frame, text="Metrics")
