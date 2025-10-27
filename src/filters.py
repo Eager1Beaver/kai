@@ -28,21 +28,28 @@ def _round_to_odd(n: int) -> int:
 class FilterConfig:
     """Holds tuning coefficients for each S level."""
     # Savgol coefficients (fractions of second * fs)
-    savgol_k_small: float = 0.03
-    savgol_k_large: float = 0.06
+    savgol_k_small: float = 0.02
+    savgol_k_large: float = 0.18
     savgol_poly_s1: int = 2
-    savgol_poly_s2: int = 3
+    savgol_poly_s2: int = 2
 
     # Butterworth mapping (order and cutoff multiplier vs pacing freq)
     # S=3 => order2 @ 3*fp, S=4 => order4 @ 2*fp
     butter_order_s3: int = 2
-    butter_mult_s3: float = 3.0
-    butter_order_s4: int = 4
-    butter_mult_s4: float = 2.0
-    butter_min_fc_hz: float = 0.2  # guard for very slow pacing
+    butter_order_s4: int = 2
+
+    # fraction of Nyquist used as fallback when fp is unknown
+    butter_fnyq_s3: float = 0.30
+    butter_fnyq_s4: float = 0.28 # 0.24
+
+    # multipliers if fp is known
+    butter_mult_s3: float = 2.2
+    butter_mult_s4: float = 1.8 # 1.6
+    # minimum cutoff frequency
+    butter_min_fc_hz: float = 0.8
 
     # Gaussian std as fraction of second * fs (sigma in samples)
-    gauss_sigma_k_s5: float = 0.04
+    gauss_sigma_k_s5: float = 0.08
     gauss_truncate: float = 3.0
 
 
@@ -130,19 +137,22 @@ class FilterEngine:
         fp: Optional[float],
         S: int,
         ) -> np.ndarray:
+
         cfg = self.config
+        nyq = fs / 2.0
+
         if fp is None or fp <= 0:
-            # Fallback cutoff if pacing unknown: 0.15*Nyquist
-            fc = 0.15 * (fs / 2.0)
-            order = cfg.butter_order_s3 if S == 3 else cfg.butter_order_s4
+            fc = (cfg.butter_fnyq_s3 if S == 3 else cfg.butter_fnyq_s4) * nyq
         else:
-            if S == 3:
-                fc = max(cfg.butter_min_fc_hz, cfg.butter_mult_s3 * fp)
-                order = cfg.butter_order_s3
-            else:  # S == 4
-                fc = max(cfg.butter_min_fc_hz, cfg.butter_mult_s4 * fp)
-                order = cfg.butter_order_s4
-        wn = min(0.999, fc / (fs / 2.0))
+            mult = cfg.butter_mult_s3 if S == 3 else cfg.butter_mult_s4
+            fc = mult * fp
+
+        # Floor the cutoff to avoid over-smoothing into a sine
+        fc = max(cfg.butter_min_fc_hz, min(fc, 0.99 * nyq))
+
+        order = cfg.butter_order_s3 if S == 3 else cfg.butter_order_s4
+
+        wn = min(0.999, fc / nyq)
         b, a = butter(order, wn, btype="low", analog=False)
         return filtfilt(b, a, y, method="pad")
 
@@ -171,3 +181,6 @@ class FilterEngine:
         if med <= 0:
             raise ValueError("Non-increasing time vector")
         return 1.0 / med
+    
+    def clear_cache(self):
+        self._cache.clear()
