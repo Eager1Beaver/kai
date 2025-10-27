@@ -194,14 +194,21 @@ class App(tk.Tk):
 
 
     def on_click_peak(self, x_click: float):
-        """Snap click to nearest extremum and toggle it (add/remove) in the appropriate set."""
+        """
+        Snap click to nearest extremum and toggle it (add/remove) in the appropriate set.
+        - If it's a MAX: toggle that period in `removed_periods` (min→min segmentation).
+        - If it's a MIN: insert/remove that min.
+        """
         if self.t_raw is None or self.y_raw is None: return
+
         t, _y_base = self._current_signal()
         y_for_edit = self.y_filt if (self.y_filt is not None) else (_y_base)
+        
         try:
             idx, kind = snap_to_local_extremum(t, y_for_edit, x_click, radius_ms=60.0)
         except Exception:
             return
+        
         if kind == "min":
             # toggle
             if idx in self.peaks_min:
@@ -213,9 +220,12 @@ class App(tk.Tk):
                 self.peaks_max = remove_peak(self.peaks_max, idx, tol=1)
             else:
                 self.peaks_max = insert_peak(self.peaks_max, idx)
-        self.peaks_min, self.peaks_max = enforce_alternation(self.peaks_min, self.peaks_max)
-        self.sig_plot.set_peaks(self.peaks_min, self.peaks_max)
         
+        # Keep both arrays sorted/unique
+        self.peaks_min, self.peaks_max = enforce_alternation(self.peaks_min, self.peaks_max)
+        
+        # Reflect changes
+        self.sig_plot.set_peaks(self.peaks_min, self.peaks_max)
         self.recompute_periods()
         self.compute_metrics_aggregates()
 
@@ -548,4 +558,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
