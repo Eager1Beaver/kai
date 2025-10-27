@@ -85,9 +85,9 @@ def _baseline_peak(t: np.ndarray, y: np.ndarray, *, first_frac: float = 0.1) -> 
 
 
 # APD metrics per period
-def apd_metrics_for_period(t: np.ndarray, y: np.ndarray, levels: Sequence[float] = (0.2, 0.5, 0.9)) -> Dict[str, float]:
+def apd_metrics_for_period(t: np.ndarray, y: np.ndarray, levels: Sequence[float] = (20, 50, 90)) -> Dict[str, float]:
     """
-    Compute APDxx for a single period segment (t,y).
+    Compute APDxx for a single period segment (t,y) where 'xx' is percent repolarization.
 
     Parameters
     ----------
@@ -103,12 +103,15 @@ def apd_metrics_for_period(t: np.ndarray, y: np.ndarray, levels: Sequence[float]
         return {"APD20": np.nan, "APD50": np.nan, "APD90": np.nan}
 
     baseline, peak, _ = _baseline_peak(t, y)
-    out = {}
+    out: Dict[str, float] = {}
+
     for p in levels:
-        lvl = _level_value(baseline, peak, p)
+        # Convert percent repolarization to fraction of (peak - baseline)
+        frac = 1.0 - (p/100)
+        lvl = _level_value(baseline, peak, frac)
         tup = _find_crossing_time(t, y, lvl, "up")
         tdn = _find_crossing_time(t, y, lvl, "down")
-        key = f"APD{int(p*100)}"
+        key = f"APD{int(p)}"
         out[key] = (tdn - tup) if (tup is not None and tdn is not None and tdn >= tup) else np.nan
     return out
 
