@@ -69,8 +69,8 @@ class Sidebar(ttk.Frame):
         
         self.scale = ttk.Scale(
             smooth_frame, from_=0, to=5, orient="horizontal", length=260,
-            command=lambda v: self._on_smooth_ui(v))\
-                .grid(row=0, column=0, sticky="ew")
+            command=lambda v: self._on_smooth_ui(v))
+        self.scale.grid(row=0, column=0, sticky="ew")
         
         ttk.Label(self, text="0 = raw . 5 = heavy")\
             .grid(row=7, column=0, sticky="w", pady=(2,0))

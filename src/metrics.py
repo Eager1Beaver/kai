@@ -161,7 +161,7 @@ def shape_metrics_for_period(t: np.ndarray, y: np.ndarray) -> Dict[str, float]:
     downstroke_angle_deg = float(np.degrees(np.arctan(np.min(dy_norm[peak_idx:])))) if peak_idx < len(dy_norm) else float('nan')
 
     # area under curve above baseline
-    auc = float(np.trapzoid(np.clip(y - baseline, 0, None), t))
+    auc = float(np.trapezoid(np.clip(y - baseline, 0, None), t))
 
     return {
         "time_to_peak": ttp,
