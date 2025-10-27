@@ -265,47 +265,41 @@ def remove_peak(peaks: np.ndarray, idx: int, *, tol: int = 0) -> np.ndarray:
     return peaks[mask]
 
 
-def enforce_alternation(peaks_min: np.ndarray, peaks_max: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def enforce_alternation(
+        peaks_min: np.ndarray, peaks_max: np.ndarray,
+        *, anchor: str = "min",
+        ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Ensure sequences alternate in time; if not, remove violations starting with the closer duplicate.
     """
     mins = np.asarray(peaks_min, dtype=int)
     maxs = np.asarray(peaks_max, dtype=int)
-    all_pts = [(i, "min") for i in mins] + [(j, "max") for j in maxs]
-    if not all_pts:
+
+    if anchor not in ("min", "max"):
+        anchor = "min"
+
+    if anchor == "min":
+        # If fewer than two mins, there are no valid min→min periods; maxima irrelevant.
+        if mins.size < 2:
+            return mins, np.array([], dtype=int)
+        keep = []
+        for m0, m1 in zip(mins[:-1], mins[1:]):
+            in_pair = maxs[(maxs > m0) & (maxs < m1)]
+            if in_pair.size > 0:
+                # keep all or 1; keeping all is harmless for display; segmentation doesn't depend on max
+                keep.extend(in_pair.tolist())
+        maxs = np.unique(np.asarray(keep, dtype=int)) if keep else np.array([], dtype=int)
         return mins, maxs
-    all_pts.sort(key=lambda x: x[0])
-
-    # Remove consecutive same-kind points keeping the stronger alternation
-    cleaned = []
-    for _, (idx, kind) in enumerate(all_pts):
-        if cleaned and cleaned[-1][1] == kind:
-            # remove the closer duplicate (current or previous). Keep the one farther from neighbors.
-            prev_idx, _ = cleaned[-1]
-            # choose which to keep by distance to next different-kind (if available)
-            keep_current = True  # default
-            cleaned.pop()  # temporarily remove prev
-            # keep the one that maximizes spacing with neighbors
-            if cleaned:
-                left_gap_prev = prev_idx - cleaned[-1][0]
-                left_gap_curr = idx - cleaned[-1][0]
-            else:
-                left_gap_prev = left_gap_curr = 1e9
-            # Decide keep
-            if left_gap_prev > left_gap_curr:
-                # keep prev, discard current
-                cleaned.append((prev_idx, kind))
-            else:
-                # keep current (append below)
-                pass
-            if keep_current and (not cleaned or cleaned[-1][0] != idx or cleaned[-1][1] != kind):
-                cleaned.append((idx, kind))
-        else:
-            cleaned.append((idx, kind))
-
-    mins_new = np.array([i for i, k in cleaned if k == "min"], dtype=int)
-    maxs_new = np.array([i for i, k in cleaned if k == "max"], dtype=int)
-    return np.unique(mins_new), np.unique(maxs_new)
+    else:
+        # Symmetric for max2max (not used now, but safe)
+        if maxs.size < 2:
+            return np.array([], dtype=int), maxs
+        keep = []
+        for M0, M1 in zip(maxs[:-1], maxs[1:]):
+            in_pair = mins[(mins > M0) & (mins < M1)]
+            keep.extend(in_pair.tolist())
+        mins = np.unique(np.asarray(keep, dtype=int)) if keep else np.array([], dtype=int)
+        return mins, maxs
 
 
 # Testing

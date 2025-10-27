@@ -101,6 +101,7 @@ class App(tk.Tk):
 
     # File IO
     def load_raw(self):
+        self.filter_engine.clear_cache()
         path = filedialog.askopenfilename(title="Select raw CSV/XLSX", filetypes=[("CSV","*.csv"), ("Excel","*.xlsx *.xls"), ("All","*.*")])
         if not path:
             return
@@ -111,6 +112,7 @@ class App(tk.Tk):
 
 
     def load_ambient(self):
+        self.filter_engine.clear_cache()
         path = filedialog.askopenfilename(title="Select ambient CSV/XLSX", filetypes=[("CSV","*.csv"), ("Excel","*.xlsx *.xls"), ("All","*.*")])
         if not path:
             return
@@ -136,6 +138,7 @@ class App(tk.Tk):
 
     # Processing
     def apply_offset_scale(self, offset_ms: float, scale: float):
+        self.filter_engine.clear_cache()
         if self.t_raw is None or self.y_raw is None or self.t_amb is None or self.y_amb is None:
             self.sidebar.status.config(text="Load raw and ambient first")
             return
@@ -209,20 +212,30 @@ class App(tk.Tk):
         except Exception:
             return
         
-        if kind == "min":
-            # toggle
+        # ver 070
+        if kind == "max":
+            # Interpret a max click as "toggle this period" under min→min strategy.
+            # Find which period [i, j) contains idx and toggle it in removed_periods.
+            if self.seg_info and self.seg_info.indices:
+                for k, (i, j) in enumerate(self.seg_info.indices, start=1):
+                    if i <= idx < j:
+                        if k in self.removed_periods:
+                            self.removed_periods.remove(k)
+                            self.sidebar.status.config(text=f"Restored period {k}")
+                        else:
+                            self.removed_periods.add(k)
+                            self.sidebar.status.config(text=f"Removed period {k}")
+                        break
+            # No changes to peaks_max needed for segmentation
+        else:
+            # MIN click = actually toggle a min peak
             if idx in self.peaks_min:
                 self.peaks_min = remove_peak(self.peaks_min, idx, tol=1)
             else:
                 self.peaks_min = insert_peak(self.peaks_min, idx)
-        else:
-            if idx in self.peaks_max:
-                self.peaks_max = remove_peak(self.peaks_max, idx, tol=1)
-            else:
-                self.peaks_max = insert_peak(self.peaks_max, idx)
         
         # Keep both arrays sorted/unique
-        self.peaks_min, self.peaks_max = enforce_alternation(self.peaks_min, self.peaks_max)
+        self.peaks_min, self.peaks_max = enforce_alternation(self.peaks_min, self.peaks_max, anchor="min")
         
         # Reflect changes
         self.sig_plot.set_peaks(self.peaks_min, self.peaks_max)
