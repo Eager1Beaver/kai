@@ -94,11 +94,11 @@ class SignalPlot:
         h = 0.12 * yspan
         for i in idxs_up:
             a = self.ax.annotate("", xy=(t[i], y[i]+h*0.5), xytext=(t[i], y[i]-h*0.5),
-                                arrowprops=dict(arrowstyle='-|>', lw=1.2, color='red'))
+                                arrowprops=dict(arrowstyle='-|>', lw=1.2, color='darkorange'))
             self._extrema_artists.append(a)
         for i in idxs_dn:
             a = self.ax.annotate("", xy=(t[i], y[i]-h*0.5), xytext=(t[i], y[i]+h*0.5),
-                                arrowprops=dict(arrowstyle='-|>', lw=1.2, color='red'))
+                                arrowprops=dict(arrowstyle='-|>', lw=1.2, color='darkblue'))
             self._extrema_artists.append(a)    
 
     def _redraw(self):
