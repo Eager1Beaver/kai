@@ -22,7 +22,7 @@ from .views import Sidebar, Tabs
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("KAI - Calcium Signal Analyzer")
+        self.title("KAI - Calcium Imaging Analyzer")
         self.geometry("1100x700")
         self._build_styles()
 
