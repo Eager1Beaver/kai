@@ -455,8 +455,8 @@ def recompute_periods():
         st.session_state.periods = []
         st.session_state.periods_raw = []
         st.session_state.period_original_indices = []
-        render_periods_tab()
-        update_overlay_plot()
+        #render_periods_tab()
+        #update_overlay_plot()
         return
     
     removed = st.session_state.removed_periods
@@ -511,7 +511,7 @@ def compute_metrics_aggregates():
     if not st.session_state.periods:
         st.session_state.metrics_agg_raw = {}
         st.session_state.metrics_agg_filt = {}
-        render_metrics_tab()
+        #render_metrics_tab()
         return
     
     per_f = metrics_for_periods(st.session_state.periods) or []
