@@ -6,6 +6,7 @@ import pandas as pd
 import io
 import json
 import matplotlib.pyplot as plt  # For generating PNG exports in-memory
+from pathlib import Path
 
 # Local imports
 from src.io import load_signal, subtract_ambient
@@ -197,11 +198,24 @@ def draw_periods_overlay_streamlit(tau, Xn, mean, std, labels=None, labeled_max=
                     ))
     return fig
 
+@st.cache_data(show_spinner=False)
+def load_user_guide() -> str:
+    """Return the Markdown of docs/User-Guide.md, with robust path fallback."""
+    candidates = [
+        Path("docs/User-Guide.md"),
+        Path(__file__).resolve().parent / "docs" / "User-Guide.md",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+    return "# User Guide not found\nPlease ensure `docs/User-Guide.md` is included in the deployment."
 
 # Main Streamlit App
 def main():
     st.set_page_config(page_title="KAI - Calcium Imaging Analyzer", layout="wide")
     st.title("KAI - Calcium Imaging Analyzer")
+
+    guide_md = load_user_guide()
 
     # Session state for persisting data
     if 't_raw' not in st.session_state:
@@ -252,6 +266,20 @@ def main():
     # Sidebar
     with st.sidebar:
         st.header("Session")
+
+        # Help box
+        st.info(
+            "Need help with the workflow? "
+            "Open the **User Guide** tab for a step-by-step walkthrough, or download it to read offline."
+            )
+        st.download_button(
+            label="⬇️ Download User-Guide.md",
+            data=guide_md.encode("utf-8"),
+            file_name="User-Guide.md",
+            mime="text/markdown",
+            use_container_width=True,
+            )
+
         raw_file = st.file_uploader("Load Raw...", type=['csv', 'xlsx', 'xls'])
         if raw_file:
             t, y, info = load_signal(raw_file)
@@ -303,7 +331,7 @@ def main():
         st.text(st.session_state.status)
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Signal", "Periods", "Overlay", "Metrics"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Signal", "Periods", "Overlay", "Metrics", "User Guide"])
 
     with tab1:
         sig_plot = SignalPlotStreamlit(on_click_peak=on_click_peak)
@@ -339,6 +367,19 @@ def main():
 
     with tab4:
         render_metrics_tab()
+
+    with tab5:
+    # Fully rendered guide in-app
+        with st.expander("Show / hide full User Guide", expanded=True):
+            st.markdown(guide_md)
+
+        st.download_button(
+            label="⬇️ Download User-Guide.md",
+            data=guide_md.encode("utf-8"),
+            file_name="User-Guide.md",
+            mime="text/markdown",
+            )
+        
 
 # Helpers
 def calculate_removed_spans():
