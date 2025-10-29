@@ -281,6 +281,7 @@ def main():
             )
 
         raw_file = st.file_uploader("Load Raw...", type=['csv', 'xlsx', 'xls'])
+        raw_loaded = raw_file is not None
         if raw_file:
             t, y, info = load_signal(raw_file)
             st.session_state.t_raw = t
@@ -334,7 +335,7 @@ def main():
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Signal", "Periods", "Overlay", "Metrics", "User Guide"])
 
     with tab1:
-        if raw_file is None:
+        if not raw_loaded:
             st.text("Load raw first")
         sig_plot = SignalPlotStreamlit(on_click_peak=on_click_peak)
         base_y = st.session_state.y_corr if st.session_state.y_corr is not None else st.session_state.y_raw
