@@ -1,20 +1,13 @@
-# app_streamlit.py
-# This is the main Streamlit entry point, mirroring app.py but using Streamlit for UI and state management.
-
 import streamlit as st
 import plotly.graph_objects as go
 from streamlit_plotly_events2 import plotly_events
 import numpy as np
 import pandas as pd
 import io
-import os
 import json
-import base64
-from PIL import Image
 import matplotlib.pyplot as plt  # For generating PNG exports in-memory
-from xlsxwriter.workbook import Workbook
 
-# Import your existing modules (assuming they are in src/)
+# Local imports
 from src.io import load_signal, subtract_ambient
 from src.filters import FilterEngine
 from src.detect import find_peaks_adaptive, snap_to_local_extremum, insert_peak, remove_peak, enforce_alternation
@@ -22,8 +15,6 @@ from src.segment import build_period_indices, slice_periods, resample_periods, n
 from src.metrics import metrics_for_periods, aggregate_metrics
 from src.ui.plot import draw_periods_overlay
 
-# New Plotly-based plotting functions (mirroring plot.py)
-# We'll define them here for simplicity; could move to plot_streamlit.py
 
 class SignalPlotStreamlit:
     def __init__(self, on_click_peak=None):
@@ -38,10 +29,11 @@ class SignalPlotStreamlit:
         self._period_bounds = []
         self._periods_removed = set()
         self._filt_legend_label = "Filtered"
+        self.base_label = "Raw"
 
-    def set_data(self, t, y_raw, y_filt=None):
+    def set_data(self, t, y_base, y_filt=None):
         self.t = t
-        self.y_raw = y_raw
+        self.y_raw = y_base
         self.y_filt = y_filt
 
     def set_filter_label(self, text):
@@ -71,13 +63,13 @@ class SignalPlotStreamlit:
                 x=t[i], y=y[i] + h * 0.5,
                 ax=t[i], ay=y[i] - h * 0.5,
                 arrowhead=1, arrowsize=1.5, arrowwidth=1.2, arrowcolor='darkorange'
-            )
+                )
         for i in idxs_dn:
             fig.add_annotation(
                 x=t[i], y=y[i] - h * 0.5,
                 ax=t[i], ay=y[i] + h * 0.5,
                 arrowhead=1, arrowsize=1.5, arrowwidth=1.2, arrowcolor='darkblue'
-            )
+                )
 
     def render(self):
         fig = go.Figure()
@@ -88,21 +80,51 @@ class SignalPlotStreamlit:
         y_for_peaks = self.y_filt if self.y_filt is not None else self.y_raw
 
         # Raw line
-        fig.add_trace(go.Scatter(x=self.t, y=self.y_raw, mode='lines', name='Raw', line=dict(width=1, color='blue'), opacity=0.7))
+        fig.add_trace(go.Scatter(
+            x=self.t, y=self.y_raw, 
+            mode='lines', name=self.base_label, 
+            line=dict(width=1, color='blue'), 
+            opacity=0.7
+            ))
 
         # Filtered line
         if self.y_filt is not None:
-            fig.add_trace(go.Scatter(x=self.t, y=self.y_filt, mode='lines', name=self._filt_legend_label, line=dict(width=1.2)))
+            fig.add_trace(go.Scatter(
+                x=self.t, y=self.y_filt, 
+                mode='lines', name=self._filt_legend_label, 
+                line=dict(width=1.2)
+                ))
 
         # Min peaks
         if self.peaks_min.size > 0:
-            fig.add_trace(go.Scatter(x=self.t[self.peaks_min], y=y_for_peaks[self.peaks_min],
-                                     mode='markers', name='min', marker=dict(symbol='triangle-down', size=8, color='blue')))
+            fig.add_trace(go.Scatter(
+                x=self.t[self.peaks_min], y=y_for_peaks[self.peaks_min],
+                mode='markers', name='min', 
+                marker=dict(symbol='triangle-down', size=8, color='blue')
+                ))
 
         # Max peaks
         if self.peaks_max.size > 0:
-            fig.add_trace(go.Scatter(x=self.t[self.peaks_max], y=y_for_peaks[self.peaks_max],
-                                     mode='markers', name='max', marker=dict(symbol='triangle-up', size=8, color='orange')))
+            fig.add_trace(go.Scatter(
+                x=self.t[self.peaks_max], y=y_for_peaks[self.peaks_max],
+                mode='markers', name='max', 
+                marker=dict(symbol='triangle-up', size=8, color='orange')
+                ))
+
+        # Collect all plotted y values for range calculation
+        all_y = np.concatenate([self.y_raw[~np.isnan(self.y_raw)]])
+        if self.y_filt is not None:
+            all_y = np.concatenate([all_y, self.y_filt[~np.isnan(self.y_filt)]])
+        if self.peaks_min.size > 0:
+            all_y = np.concatenate([all_y, y_for_peaks[self.peaks_min]])
+        if self.peaks_max.size > 0:
+            all_y = np.concatenate([all_y, y_for_peaks[self.peaks_max]])
+        
+        if len(all_y) > 0:
+            min_y = np.nanmin(all_y)
+            max_y = np.nanmax(all_y)
+            yspan_data = max_y - min_y if max_y - min_y > 0 else 1
+            fig.update_yaxes(range=[min_y - 0.1 * yspan_data, max_y + 0.1 * yspan_data])
 
         # Extrema arrows
         self._draw_extrema_arrows(fig, self.t, y_for_peaks, self.peaks_max, self.peaks_min)
@@ -118,8 +140,12 @@ class SignalPlotStreamlit:
             fig.add_vline(x=t1, line=dict(color=color, dash='dash', width=0.8), opacity=0.5)
             # Label
             tx = 0.5 * (t0 + t1)
-            fig.add_annotation(x=tx, y=0.95, yref='paper', text=str(k), showarrow=False,
-                               font=dict(size=9, color=color), bgcolor='white', opacity=0.6)
+            fig.add_annotation(
+                x=tx, y=0.95, 
+                yref='paper', text=str(k), showarrow=False,
+                font=dict(size=9, color=color), bgcolor='white', 
+                opacity=0.6
+                )
 
         fig.update_layout(xaxis_title='Time (s)', yaxis_title='Signal (a.u.)', showlegend=True, legend=dict(x=1, y=1))
         fig.update_xaxes(showgrid=True, gridcolor='lightgray', gridwidth=0.5)
@@ -152,11 +178,23 @@ def draw_periods_overlay_streamlit(tau, Xn, mean, std, labels=None, labeled_max=
     fig.add_trace(go.Scatter(x=tau, y=mean, mode='lines', name='Mean', line=dict(width=1.8)))
 
     if std is not None and np.all(np.isfinite(std)):
-        fig.add_trace(go.Scatter(x=tau, y=mean + std, mode='lines', line=dict(width=0), showlegend=False, fill=None))
-        fig.add_trace(go.Scatter(x=tau, y=mean - std, mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(0,100,80,0.15)', showlegend=False))
+        fig.add_trace(go.Scatter(
+            x=tau, y=mean + std, 
+            mode='lines', line=dict(width=0), 
+            showlegend=False, fill=None
+            ))
+        fig.add_trace(go.Scatter(
+            x=tau, y=mean - std, 
+            mode='lines', line=dict(width=0), 
+            fill='tonexty', fillcolor='rgba(0,100,80,0.15)', 
+            showlegend=False
+            ))
 
-    fig.update_layout(xaxis_title="Normalized time τ", yaxis_title="Normalized amplitude", showlegend=True,
-                      legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, font_size=9))
+    fig.update_layout(
+        xaxis_title="Normalized time τ", yaxis_title="Normalized amplitude", 
+        showlegend=True, 
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, font_size=9
+                    ))
     return fig
 
 
@@ -206,13 +244,17 @@ def main():
         st.session_state.pacing_hz_manual = None
     if 'status' not in st.session_state:
         st.session_state.status = "Ready."
+    if 'offset_ms' not in st.session_state:
+        st.session_state.offset_ms = 0.0
+    if 'scale' not in st.session_state:
+        st.session_state.scale = 1.0    
 
     # Sidebar
     with st.sidebar:
         st.header("Session")
         raw_file = st.file_uploader("Load Raw...", type=['csv', 'xlsx', 'xls'])
         if raw_file:
-            t, y, info = load_signal(raw_file)  # Assumes io.py updated to handle file-like
+            t, y, info = load_signal(raw_file)
             st.session_state.t_raw = t
             st.session_state.y_raw = y
             st.session_state.filter_engine.clear_cache()
@@ -226,11 +268,11 @@ def main():
             st.session_state.y_amb = y
             st.session_state.filter_engine.clear_cache()
             st.session_state.status = f"Loaded ambient: {amb_file.name} ({info.n_rows} rows)"
-            apply_offset_scale(st.session_state.get('offset_ms', 0.0), st.session_state.get('scale', 1.0))
+            apply_offset_scale(st.session_state.offset_ms, st.session_state.scale)
 
         st.header("Ambient alignment")
-        offset_ms = st.number_input("Offset (ms):", value=0.0)
-        scale = st.number_input("Scale:", value=1.0)
+        offset_ms = st.number_input("Offset (ms):", value=st.session_state.offset_ms)
+        scale = st.number_input("Scale:", value=st.session_state.scale)
         if st.button("Apply"):
             apply_offset_scale(offset_ms, scale)
 
@@ -242,11 +284,11 @@ def main():
         st.text(st.session_state.get('pace_status', "Current: auto"))
 
         st.header("Smoothing")
-        smoothing_level = st.slider("S = ", min_value=0, max_value=5, value=0, step=1)
+        smoothing_level = st.slider("S = ", min_value=0, max_value=5, value=st.session_state.filter_engine.smoothing_level, step=1)
         if smoothing_level != st.session_state.filter_engine.smoothing_level:
             on_smooth_changed(smoothing_level)
 
-        st.text("0 = raw . 5 = heavy")
+        st.text("0 = raw - 5 = heavy")
 
         if st.button("Detect Peaks"):
             detect_peaks()
@@ -265,17 +307,25 @@ def main():
 
     with tab1:
         sig_plot = SignalPlotStreamlit(on_click_peak=on_click_peak)
-        sig_plot.set_data(st.session_state.t_raw, st.session_state.y_raw, st.session_state.y_filt)
+        base_y = st.session_state.y_corr if st.session_state.y_corr is not None else st.session_state.y_raw
+        sig_plot.base_label = "Ambient-corrected" if st.session_state.y_corr is not None else "Raw"
+        sig_plot.set_data(st.session_state.t_raw, base_y, st.session_state.y_filt)
         sig_plot.set_filter_label(f"Filtered (S={st.session_state.filter_engine.smoothing_level})")
         sig_plot.set_peaks(st.session_state.peaks_min, st.session_state.peaks_max)
         sig_plot.enable_edit(st.session_state.edit_mode)
+
         # Set spans and boundaries (from state)
         if st.session_state.seg_info:
-            spans = calculate_removed_spans()  # Define this helper
+            spans = calculate_removed_spans()
             sig_plot.set_removed_spans(spans)
-            bounds = [(st.session_state.t_raw[i], st.session_state.t_raw[j], k) for k, (i, j) in enumerate(st.session_state.seg_info.indices, 1)]
+            bounds = [
+                (
+                    st.session_state.t_raw[i], 
+                    st.session_state.t_raw[j-1] if j < len(st.session_state.t_raw) else st.session_state.t_raw[-1], k
+                    ) for k, (i, j) in enumerate(st.session_state.seg_info.indices, 1)
+                    ] 
             sig_plot.set_period_boundaries(bounds, st.session_state.removed_periods)
-        fig, selected_points = sig_plot.render()
+        _, selected_points = sig_plot.render()
         if selected_points:
             for point in selected_points:
                 if 'x' in point:
@@ -290,17 +340,16 @@ def main():
     with tab4:
         render_metrics_tab()
 
-# Helpers (mirroring app.py methods)
-
+# Helpers
 def calculate_removed_spans():
     spans = []
     if st.session_state.seg_info and st.session_state.seg_info.indices:
-        i0, _ = st.session_state.seg_info.indices[0]
+        i0 = st.session_state.seg_info.indices[0][0]
         spans.append((st.session_state.t_raw[0], st.session_state.t_raw[i0]))
-        _, jlast = st.session_state.seg_info.indices[-1]
+        jlast = st.session_state.seg_info.indices[-1][1]
         spans.append((st.session_state.t_raw[jlast], st.session_state.t_raw[-1]))
         for k in st.session_state.removed_periods:
-            if 1 <= k <= len(st.session_state.seg_info.indices):
+            if 0 < k <= len(st.session_state.seg_info.indices):
                 i, j = st.session_state.seg_info.indices[k-1]
                 spans.append((st.session_state.t_raw[i], st.session_state.t_raw[j]))
     return spans
@@ -311,7 +360,11 @@ def apply_offset_scale(offset_ms, scale):
     if st.session_state.t_raw is None or st.session_state.y_raw is None or st.session_state.t_amb is None or st.session_state.y_amb is None:
         st.session_state.status = "Load raw and ambient first"
         return
-    y_corr, meta = subtract_ambient(st.session_state.t_raw, st.session_state.y_raw, st.session_state.t_amb, st.session_state.y_amb, offset_ms=offset_ms, scale=scale)
+    y_corr, meta = subtract_ambient(
+        st.session_state.t_raw, st.session_state.y_raw, 
+        st.session_state.t_amb, st.session_state.y_amb, 
+        offset_ms=offset_ms, scale=scale
+        )
     st.session_state.y_corr = y_corr
     st.session_state.meta_amb = meta
     st.session_state.status = f"Ambient subtracted (offset={meta['offset_ms']} ms, scale={meta['scale']})"
@@ -329,7 +382,6 @@ def _pacing_hint():
 def _current_signal():
     return (st.session_state.t_raw, st.session_state.y_corr if st.session_state.y_corr is not None else st.session_state.y_raw)
 
-@st.cache_data
 def refresh_signal(live=False):
     if st.session_state.t_raw is None or st.session_state.y_raw is None:
         return
@@ -395,6 +447,7 @@ def on_click_peak(x_click):
 def recompute_periods():
     if st.session_state.t_raw is None or st.session_state.y_raw is None:
         return
+    
     t, y_base = _current_signal()
     y_det = st.session_state.y_filt if st.session_state.y_filt is not None else y_base
     st.session_state.seg_info = build_period_indices(t, st.session_state.peaks_min, st.session_state.peaks_max, strategy="min2min")
@@ -405,15 +458,18 @@ def recompute_periods():
         render_periods_tab()
         update_overlay_plot()
         return
+    
     removed = st.session_state.removed_periods
     kept_indices = [ij for k, ij in enumerate(st.session_state.seg_info.indices, start=1) if k not in removed]
     st.session_state.period_original_indices = [k for k, ij in enumerate(st.session_state.seg_info.indices, start=1) if k not in removed]
+
     if not kept_indices:
         st.session_state.periods = []
         st.session_state.periods_raw = []
         render_periods_tab()
         update_overlay_plot()
         return
+    
     st.session_state.periods = slice_periods(t, y_det, kept_indices)
     st.session_state.periods_raw = slice_periods(t, y_base, kept_indices)
     render_periods_tab()
@@ -423,6 +479,7 @@ def render_periods_tab():
     if not st.session_state.periods:
         st.text("No periods yet. Detect peaks first.")
         return
+    
     lines = []
     for orig_k, (t_seg, y_seg) in zip(st.session_state.period_original_indices, st.session_state.periods):
         dur = t_seg[-1] - t_seg[0]
@@ -431,8 +488,9 @@ def render_periods_tab():
 
 def update_overlay_plot():
     if not st.session_state.periods or len(st.session_state.periods) == 0:
-        st.text("No periods yet - detect peaks first.")
+        st.text("No periods yet. Detect peaks first.")
         return
+    
     try:
         res = resample_periods(st.session_state.periods, n_points=200)
         X, tau = res if isinstance(res, tuple) else (res, np.linspace(0.0, 1.0, res.shape[1]))
@@ -440,10 +498,12 @@ def update_overlay_plot():
         if not labels:
             st.text("All periods removed - nothing to display")
             return
+        
         Xn = normalize_periods(X, mode="baseline")
         mu, sd = average_period(Xn)
         fig = draw_periods_overlay_streamlit(tau, Xn, mu, sd, labels=labels, labeled_max=12)
         st.plotly_chart(fig)
+
     except Exception as e:
         st.error(f"Overlay error: {e}")
 
@@ -453,6 +513,7 @@ def compute_metrics_aggregates():
         st.session_state.metrics_agg_filt = {}
         render_metrics_tab()
         return
+    
     per_f = metrics_for_periods(st.session_state.periods) or []
     per_r = metrics_for_periods(st.session_state.periods_raw) or []
     agg_f = aggregate_metrics(per_f) if per_f else {}
@@ -463,36 +524,39 @@ def compute_metrics_aggregates():
 
 def render_metrics_tab():
     if not st.session_state.metrics_agg_raw and not st.session_state.metrics_agg_filt:
+        st.text("No periods yet. Detect peaks first.")
         return
+    
     # Similar to _render_metrics_tab_from_aggs
     norm_r = normalize_agg(st.session_state.metrics_agg_raw)
     norm_f = normalize_agg(st.session_state.metrics_agg_filt)
     bases = sorted(set(norm_r.keys()) | set(norm_f.keys()))
     if not bases:
         return
-    # Priority order same as original
+    
     priority = ["APD20","APD50","APD90","rise_10_90","decay_90_10",
                 "time_to_peak","upstroke_angle_deg","downstroke_angle_deg",
                 "auc_above_baseline","duration_s","amp_mean","amp_std","amp_peak","amp_min","amp_range","slope_max","slope_min"]
     order = [b for b in priority if b in bases] + [b for b in bases if b not in priority]
     data = []
+
     for base in order:
         rmu, rsd = norm_r.get(base, (np.nan, np.nan))
         fmu, fsd = norm_f.get(base, (np.nan, np.nan))
         if all(np.isnan(v) for v in (rmu, rsd, fmu, fsd)):
             continue
+
         data.append({
             "Metric": base,
             "Raw mean": f"{rmu:.4g}" if not np.isnan(rmu) else "—",
             "Raw std": f"{rsd:.4g}" if not np.isnan(rsd) else "—",
             "Filt mean": f"{fmu:.4g}" if not np.isnan(fmu) else "—",
             "Filt std": f"{fsd:.4g}" if not np.isnan(fsd) else "—",
-        })
+            })
     df = pd.DataFrame(data)
     st.table(df)
 
 def normalize_agg(agg):
-    # Same as _normalize_agg in app.py
     out = {}
     for k, v in agg.items():
         if isinstance(v, dict):
@@ -516,6 +580,7 @@ def export_all():
     if st.session_state.t_raw is None or st.session_state.y_raw is None or not st.session_state.periods:
         st.info("Nothing to export yet.")
         return
+    
     # Generate in-memory Excel
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -524,7 +589,7 @@ def export_all():
             "ambient_offset_ms": st.session_state.meta_amb.get("offset_ms"),
             "ambient_scale": st.session_state.meta_amb.get("scale"),
             "n_periods": len(st.session_state.periods),
-        }
+            }
         pd.DataFrame([params]).to_excel(writer, sheet_name="Parameters", index=False)
         durs = [float(t_seg[-1] - t_seg[0]) for (t_seg, _y) in st.session_state.periods]
         pd.DataFrame({"period": list(range(1, len(durs)+1)), "duration_s": durs}).to_excel(writer, sheet_name="Periods", index=False)
