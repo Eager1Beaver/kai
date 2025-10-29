@@ -3,3 +3,4 @@ data/output/test_*
 /kai
 /src/__pycache__
 /src/ui/__pycache__
+/.st_tmp
