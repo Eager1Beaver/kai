@@ -334,6 +334,8 @@ def main():
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Signal", "Periods", "Overlay", "Metrics", "User Guide"])
 
     with tab1:
+        if not st.session_state.t_raw and not st.session_state.y_raw:
+            st.text("Load raw first")
         sig_plot = SignalPlotStreamlit(on_click_peak=on_click_peak)
         base_y = st.session_state.y_corr if st.session_state.y_corr is not None else st.session_state.y_raw
         sig_plot.base_label = "Ambient-corrected" if st.session_state.y_corr is not None else "Raw"
@@ -425,7 +427,6 @@ def _current_signal():
 
 def refresh_signal(live=False):
     if st.session_state.t_raw is None or st.session_state.y_raw is None:
-        st.text("Load raw signal first.")
         return
     t, y = _current_signal()
     S = st.session_state.filter_engine.smoothing_level
