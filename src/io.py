@@ -29,18 +29,28 @@ class LoadInfo:
     value_col: str
     n_rows: int
 
-def load_signal(path: str, *, sheet: Optional[str] = None,
-                time_col: Optional[str] = None,
-                value_col: Optional[str] = None,
-                dropna: bool = True):
-    fpath = _ensure_str(path)
-    lower = fpath.lower()
-    if lower.endswith(".csv"):
-        df = pd.read_csv(fpath)
-    elif lower.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(fpath, sheet_name=sheet)
+def load_signal(path_or_file, *, sheet: Optional[str] = None, time_col: Optional[str] = None, value_col: Optional[str] = None, dropna: bool = True):
+    if isinstance(path_or_file, str):
+        fpath = _ensure_str(path_or_file)
+        lower = fpath.lower()
+        if lower.endswith(".csv"):
+            df = pd.read_csv(fpath)
+        elif lower.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(fpath, sheet_name=sheet)
+        else:
+            raise ValueError("Unsupported file type. Use .csv or .xlsx/.xls")
     else:
-        raise ValueError("Unsupported file type. Use .csv or .xlsx/.xls")
+        # File-like (BytesIO)
+        fpath = _ensure_str(path_or_file) #
+        lower = path_or_file.name.lower()
+        if lower.endswith(".csv"):
+            path_or_file.seek(0)
+            df = pd.read_csv(path_or_file)
+        elif lower.endswith((".xlsx", ".xls")):
+            path_or_file.seek(0)
+            df = pd.read_excel(path_or_file, sheet_name=sheet)
+        else:
+            raise ValueError("Unsupported file type. Use .csv or .xlsx/.xls")
 
     if df.empty:
         raise ValueError("The file appears to be empty.")
