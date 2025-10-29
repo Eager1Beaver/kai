@@ -3,8 +3,16 @@ import numpy as np
 from typing import Callable, Optional, Sequence
 import matplotlib
 matplotlib.use("Agg")
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+
+# Guard Tk import (Streamlit Cloud doesn't have tkinter)
+try:
+    #import tkinter as tk  # noqa: F401
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    _TK_AVAILABLE = True
+except Exception:
+    FigureCanvasTkAgg = None  # type: ignore
+    _TK_AVAILABLE = False
 
 class SignalPlot:
     """
