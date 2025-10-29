@@ -425,6 +425,7 @@ def _current_signal():
 
 def refresh_signal(live=False):
     if st.session_state.t_raw is None or st.session_state.y_raw is None:
+        st.text("Load raw signal first.")
         return
     t, y = _current_signal()
     S = st.session_state.filter_engine.smoothing_level
