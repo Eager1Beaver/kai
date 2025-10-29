@@ -16,7 +16,7 @@ from src.segment import build_period_indices, slice_periods, resample_periods
 
 # Streamlit UI layer
 from src.ui_streamlit.layout import sidebar_controls, tabs_main
-from src.ui_streamlit.export import build_excel_bundle, build_csv_mirrors, save_plotly_figure
+from src.ui_streamlit.export import build_excel_bundle, save_plotly_figure
 from src.ui_streamlit.plot_st import overlay_figure
 
 st.set_page_config(page_title="KAI — Calcium Imaging Analyzer", layout="wide")
@@ -64,29 +64,52 @@ def _persist_upload(uploaded) -> Optional[str]:
     return str(p)
 
 
-def current_working_signal() -> Tuple[np.ndarray, np.ndarray]:
-    """Return (t, y_filtered) after optional ambient subtraction + smoothing."""
+def current_baseline_signal() -> tuple[np.ndarray, np.ndarray]:
+    """
+    Return (t, y_base) where y_base is raw or ambient-corrected (no smoothing).
+    Also caches to session for plotting/clicks.
+    """
     t = st.session_state["t_raw"]
     y = st.session_state["y_raw"]
     if t is None or y is None:
+        st.session_state["t_base"] = np.array([])
+        st.session_state["y_base"] = np.array([])
         return np.array([]), np.array([])
 
-    y_work = y.copy()
+    y_base = y.copy()
     if st.session_state["t_amb"] is not None and st.session_state["y_amb"] is not None:
         off_ms = st.session_state["ambient"]["offset_ms"]
         scale = st.session_state["ambient"]["scale"]
-        y_work, _meta = subtract_ambient(
-            t, y_work, st.session_state["t_amb"], st.session_state["y_amb"],
+        y_base, _meta = subtract_ambient(
+            t, y_base, st.session_state["t_amb"], st.session_state["y_amb"],
             offset_ms=off_ms, scale=scale
         )
+    st.session_state["t_base"] = t
+    st.session_state["y_base"] = y_base
+    return t, y_base
+
+
+def current_working_signal() -> tuple[np.ndarray, np.ndarray | None]:
+    """
+    Return (t, y_filt) where y_filt may be None if S==0.
+    Also caches t_work/y_work for click handlers.
+    """
+    t, y_base = current_baseline_signal()
+    if t.size == 0:
+        st.session_state["t_work"] = np.array([])
+        st.session_state["y_work"] = None
+        return np.array([]), None
 
     S = int(st.session_state["smoothing"])
     fe: FilterEngine = st.session_state["filter_engine"]
     fe.smoothing_level = S
-    y_f = fe.apply(t, y_work, pacing_freq_hz=st.session_state["pacing_hint_hz"])
-    # Cache for click handlers
+    if S == 0:
+        y_f = None
+    else:
+        y_f = fe.apply(t, y_base, pacing_freq_hz=st.session_state["pacing_hint_hz"])
+
     st.session_state["t_work"] = t
-    st.session_state["y_work"] = y_f
+    st.session_state["y_work"] = y_f  # may be None
     return t, y_f
 
 
@@ -174,17 +197,25 @@ def main():
                 st.session_state["y_amb"] = None
 
             # Run detection on the filtered working signal
-            t_w, y_w = current_working_signal()
-            if t_w.size == 0:
-                st.error("Please upload a raw signal first.")
+            # Ensure signals are cached
+            t_base, y_base = current_baseline_signal()
+            t_w, y_filt = current_working_signal()
+
+            # Validate equal lengths before proceeding
+            if t_base.shape[0] != y_base.shape[0]:
+                st.error("Raw/baseline time and signal lengths differ. Check input file/columns.")
             else:
-                res = find_peaks_adaptive(t_w, y_w, fp_hint=st.session_state["pacing_hint_hz"])
+                # Choose the series to detect on
+                y_for_detect = y_filt if y_filt is not None else y_base
+                # (t_base and t_w are the same vector; use t_base for clarity)
+                res = find_peaks_adaptive(t_base, y_for_detect, fp_hint=st.session_state["pacing_hint_hz"])
                 st.session_state["peaks_max"] = res.peaks_max
                 st.session_state["peaks_min"] = res.peaks_min
-                st.session_state["removed_max_idxs"] = set()   # reset removals
+                st.session_state["removed_max_idxs"] = set()
                 recompute_periods_and_metrics()
                 st.success(f"Detected {len(st.session_state['periods_filt'])} periods.")
-
+    
+    
     # Working signal for plotting
     t_work, y_work = current_working_signal()
 
