@@ -52,7 +52,7 @@ Analyze periodic **calcium-imaging** traces end‑to‑end: load raw (+ optional
 
 ### Option A — Open the web app (Streamlit)
 
-- **Web app:** `https://kai-caipulse.streamlit.app/`
+- **Web app:** **[kai-caipulse.streamlit.app](https://kai-caipulse.streamlit.app)**
 
 > The web app mirrors the workflow below: **Load → Smooth → Detect → Curate → Overlay → Metrics → Export**.
 
